@@ -1,5 +1,5 @@
 """
-Tracks written by hand: typed in the terminal, pasted, or listed in a text file.
+Tracks written by hand: typed or pasted in the window, or listed in a text file.
 """
 
 import re

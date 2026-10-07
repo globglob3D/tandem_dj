@@ -67,7 +67,7 @@ def run_download(
     :param notify: Receiver of progress messages, called with the message and one of the ``LEVEL_`` constants
     :param confirm: Asks the user a yes or no question and returns the answer; used before every download that
         Private Internet Access does not protect
-    :param on_output_line: Receiver of every line sockseek prints; without it sockseek prints to the console
+    :param on_output_line: Receiver of every line sockseek prints
     :param keep_running: Extra condition checked every few seconds; sockseek is stopped once it returns ``False``
     :param on_search_variants: Told which spelling each track is searched under, before every further search
     :returns: The outcome of every requested track, with converted file names

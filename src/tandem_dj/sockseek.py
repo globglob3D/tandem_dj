@@ -35,7 +35,6 @@ INDEX_STATE_FAILED = "2"
 INDEX_STATE_ALREADY_DOWNLOADED = "3"
 PASSWORD_PLACEHOLDER = "********"
 WATCH_INTERVAL_SECONDS = 5
-INTERRUPTED_EXIT_CODE = 130
 
 
 class SockseekDownloader:
@@ -58,8 +57,8 @@ class SockseekDownloader:
         """
         Download tracks into the output folder and report what happened to each of them.
 
-        Without ``on_output_line``, sockseek prints its own progress to the terminal. With it, sockseek output is
-        handed over line by line instead, and includes JSON progress events.
+        With ``on_output_line``, sockseek output is handed over line by line and includes JSON progress events.
+        Without it, sockseek writes to the standard output of the application, if it has one.
 
         Before the run, leftovers of interrupted runs are removed from the index; after it, the partial files
         sockseek leaves in its staging folder inside the output folder are deleted.
@@ -289,7 +288,7 @@ def run_while(
     :param keep_running: Condition checked at every interval; ``None`` lets the program run to its end
     :param watch_interval_seconds: Time between two checks of the condition
     :param on_output_line: Receiver of every line the program prints, called from a background thread; without it
-        the program prints straight to the terminal
+        the program writes to the standard output of the application
     :returns: ``(exit_code, stopped_early)``; ``stopped_early`` is ``True`` when the condition ended the program
     """
     if on_output_line is None:
@@ -337,17 +336,13 @@ def _wait_while(
     :param watch_interval_seconds: Time between two checks of the condition
     :returns: ``(exit_code, stopped_early)``
     """
-    try:
-        while True:
-            try:
-                return process.wait(timeout=watch_interval_seconds), False
-            except subprocess.TimeoutExpired:
-                if keep_running is not None and not keep_running():
-                    process.kill()
-                    return process.wait(), True
-    except KeyboardInterrupt:
-        process.wait()
-        return INTERRUPTED_EXIT_CODE, False
+    while True:
+        try:
+            return process.wait(timeout=watch_interval_seconds), False
+        except subprocess.TimeoutExpired:
+            if keep_running is not None and not keep_running():
+                process.kill()
+                return process.wait(), True
 
 
 def input_row(track: Track) -> dict[str, str]:
