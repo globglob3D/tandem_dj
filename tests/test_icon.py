@@ -4,12 +4,15 @@ Tests of the icon files shipped with the application and of the script that draw
 
 import importlib.util
 import struct
+import zlib
 
 import pytest
 
 from tandem_dj.paths import SOURCE_ROOT, asset_path
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+ICO_HEADER_LENGTH = 6
+ICO_ENTRY_LENGTH = 16
 
 
 @pytest.fixture(scope="module")
@@ -23,36 +26,54 @@ def make_icon():
     return module
 
 
+def decode_png(content: bytes) -> list[list[tuple[int, int, int, int]]]:
+    """
+    Read back the pixels of a PNG file written by the drawing script.
+
+    :param content: Content of an unfiltered 8-bit RGBA PNG file
+    :returns: Rows of pixels
+    """
+    assert content.startswith(PNG_SIGNATURE)
+    position, compressed, width = len(PNG_SIGNATURE), b"", 0
+    while position < len(content):
+        length, kind = struct.unpack_from(">I4s", content, position)
+        payload = content[position + 8 : position + 8 + length]
+        if kind == b"IHDR":
+            width = struct.unpack_from(">I", payload)[0]
+        elif kind == b"IDAT":
+            compressed += payload
+        position += 12 + length
+    raw = zlib.decompress(compressed)
+    row_length = 1 + 4 * width
+    rows = [raw[start + 1 : start + row_length] for start in range(0, len(raw), row_length)]
+    return [[tuple(row[offset : offset + 4]) for offset in range(0, len(row), 4)] for row in rows]
+
+
 def test_shipped_icon_files_are_what_the_script_draws(make_icon):
     """
-    The icon files in the package are up to date with the drawing script.
+    The icon files in the package hold, at every size, the picture the drawing script draws now.
     """
-    assert asset_path("icon.png").read_bytes() == make_icon.encode_png(make_icon.render(make_icon.PNG_SIZE))
-    assert asset_path("icon.ico").read_bytes() == make_icon.encode_ico(
-        {size: make_icon.encode_png(make_icon.render(size)) for size in make_icon.ICO_SIZES}
-    )
-    assert asset_path("icon.icns").read_bytes() == make_icon.encode_icns(
-        [(kind, make_icon.encode_png(make_icon.render(size))) for kind, size in make_icon.ICNS_ENTRIES]
-    )
+    assert decode_png(asset_path("icon.png").read_bytes()) == make_icon.render(make_icon.PNG_SIZE)
 
-
-def test_icon_files_have_the_structure_their_formats_require(make_icon):
-    """
-    The Windows icon lists one picture per size, and the macOS icon declares its own length.
-    """
     windows_icon = asset_path("icon.ico").read_bytes()
     reserved, kind, count = struct.unpack_from("<HHH", windows_icon)
     assert (reserved, kind, count) == (0, 1, len(make_icon.ICO_SIZES))
     for position, size in enumerate(sorted(make_icon.ICO_SIZES)):
-        width, height, _, _, _, _, length, offset = struct.unpack_from("<BBBBHHII", windows_icon, 6 + 16 * position)
+        entry = struct.unpack_from("<BBBBHHII", windows_icon, ICO_HEADER_LENGTH + ICO_ENTRY_LENGTH * position)
+        width, height, length, offset = entry[0], entry[1], entry[6], entry[7]
         assert (width, height) == (size % 256, size % 256)
-        assert windows_icon[offset : offset + 8] == PNG_SIGNATURE
-        assert offset + length <= len(windows_icon)
+        assert decode_png(windows_icon[offset : offset + length]) == make_icon.render(size)
 
     mac_icon = asset_path("icon.icns").read_bytes()
     assert mac_icon[:4] == b"icns"
     assert struct.unpack_from(">I", mac_icon, 4)[0] == len(mac_icon)
-    assert asset_path("icon.png").read_bytes().startswith(PNG_SIGNATURE)
+    position = 8
+    for kind, size in make_icon.ICNS_ENTRIES:
+        entry_kind, entry_length = struct.unpack_from(">4sI", mac_icon, position)
+        assert entry_kind == kind.encode("ascii")
+        assert decode_png(mac_icon[position + 8 : position + entry_length]) == make_icon.render(size)
+        position += entry_length
+    assert position == len(mac_icon)
 
 
 def test_icon_keeps_square_pixels_and_transparent_corners(make_icon):
