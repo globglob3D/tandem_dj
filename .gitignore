@@ -1,0 +1,20 @@
+# Local settings (contains the Soulseek password)
+config.toml
+
+# Runtime state: download history, generated sockseek inputs
+data/
+
+# Third-party binary, too large for git (see vendor/sockseek/README.md)
+vendor/sockseek/sockseek.exe
+vendor/sockseek/sockseek.conf
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+*.log
