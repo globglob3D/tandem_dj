@@ -463,9 +463,7 @@ class MainWindow(tkinter.Tk):
         :param exception: The exception
         :param traceback: Where it happened
         """
-        logging.getLogger("tandem_dj").error(
-            "Unexpected error in the window", exc_info=(exception_type, exception, traceback)
-        )
+        write_error_log("Unexpected error in the window", exception)
         self._append_log(
             f"Unexpected error: {exception_type.__name__}: {exception} (details in the log file)", LEVEL_ERROR
         )

@@ -41,12 +41,15 @@ def test_messages_reach_the_log_file_without_secrets(log_file):
         raise RuntimeError("login failed for hunter2-password")
     except RuntimeError:
         logs.write_error_log("While downloading")
+    logs.write_error_log("In a button", ValueError("bad click with hunter2-password"))
     text = log_file.read_text(encoding="utf-8")
     assert logs.current_log_path() == log_file
     assert "--pass ********" in text
     assert "WARNING  something looks off" in text
     assert "ERROR    While downloading" in text
     assert "RuntimeError: login failed for ********" in text
+    assert "ERROR    In a button" in text
+    assert "ValueError: bad click with ********" in text
     assert "hunter2-password" not in text
 
 

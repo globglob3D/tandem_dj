@@ -58,13 +58,14 @@ def write_log(message: str, level: int = logging.INFO) -> None:
     logging.getLogger(LOGGER_NAME).log(level, message)
 
 
-def write_error_log(context: str) -> None:
+def write_error_log(context: str, exception: BaseException | None = None) -> None:
     """
-    Record the exception being handled, with its traceback.
+    Record an exception with its traceback.
 
     :param context: What was being done when the exception happened
+    :param exception: The exception to record, the one being handled when left out
     """
-    logging.getLogger(LOGGER_NAME).error(context, exc_info=True)
+    logging.getLogger(LOGGER_NAME).error(context, exc_info=exception or True)
 
 
 def hide_secret(secret: str) -> None:
