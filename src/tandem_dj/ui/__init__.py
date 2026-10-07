@@ -1,5 +1,5 @@
 """
-The window of the toolbox, built with tkinter.
+The window of the application, built with tkinter.
 """
 
 from pathlib import Path
@@ -13,6 +13,6 @@ def run(config_path: Path | None = None) -> None:
     """
     Open the main window and keep it running until it is closed.
 
-    :param config_path: Settings file to use, ``None`` for ``config.toml`` at the repository root
+    :param config_path: Settings file to use, ``None`` for ``config.toml`` in the user data folder
     """
     MainWindow(config_path).mainloop()

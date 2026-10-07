@@ -9,8 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from tandem_dj.config import DEFAULT_SOCKSEEK_EXECUTABLE, PROJECT_ROOT, Settings
+from tandem_dj.config import Settings
 from tandem_dj.models import Track
+from tandem_dj.paths import bundled_sockseek
 from tandem_dj.sockseek import (
     DownloadError,
     SockseekDownloader,
@@ -22,7 +23,7 @@ from tandem_dj.sockseek import (
     write_input_file,
 )
 
-SOCKSEEK_EXECUTABLE = PROJECT_ROOT / DEFAULT_SOCKSEEK_EXECUTABLE
+SOCKSEEK_EXECUTABLE = bundled_sockseek()
 
 
 def make_settings(tmp_path: Path, **overrides) -> Settings:

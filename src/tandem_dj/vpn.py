@@ -46,7 +46,7 @@ class VpnGuard:
         if not self.piactl_executable.is_file():
             raise VpnError(
                 f"Private Internet Access was not found at {self.piactl_executable}. "
-                "Fix the path in the [vpn] section of config.toml, or set required = false there."
+                "Install it, or change the VPN part of the settings."
             )
         if not self.is_connected():
             self._connect()

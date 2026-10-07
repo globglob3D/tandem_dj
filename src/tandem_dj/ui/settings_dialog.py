@@ -10,7 +10,7 @@ from tkinter import filedialog, messagebox, ttk
 from tandem_dj.config import Settings, save_settings
 from tandem_dj.ui import theme
 
-DIALOG_TITLE = "tandem_dj settings"
+DIALOG_TITLE = "Tandem DJ settings"
 
 
 class SettingsDialog(tkinter.Toplevel):
@@ -21,7 +21,7 @@ class SettingsDialog(tkinter.Toplevel):
 
     :param parent: Window the dialog belongs to
     :param settings: Settings shown when the dialog opens
-    :param config_path: Settings file to write, ``None`` for ``config.toml`` at the repository root
+    :param config_path: Settings file to write, ``None`` for ``config.toml`` in the user data folder
     """
 
     def __init__(self, parent: tkinter.Misc, settings: Settings, config_path: Path | None = None) -> None:
@@ -71,7 +71,7 @@ class SettingsDialog(tkinter.Toplevel):
             form, "Convert downloads in any other format to MP3 and delete the original", self.convert_to_mp3
         )
         self._add_entry(form, "MP3 bitrate (kbps)", self.mp3_bitrate)
-        self._add_entry(form, "ffmpeg program", self.ffmpeg_executable, hint="name on the PATH, or full path")
+        self._add_entry(form, "ffmpeg program", self.ffmpeg_executable, hint="empty: the one shipped")
 
         buttons = ttk.Frame(self, padding=(14, 0, 14, 14))
         buttons.pack(fill="x")
@@ -147,9 +147,7 @@ class SettingsDialog(tkinter.Toplevel):
         """
         Let the user pick the Private Internet Access command line program.
         """
-        chosen_file = filedialog.askopenfilename(
-            parent=self, title="piactl.exe", filetypes=[("Programs", "*.exe"), ("All files", "*.*")]
-        )
+        chosen_file = filedialog.askopenfilename(parent=self, title="piactl program")
         if chosen_file:
             self.piactl_executable.set(chosen_file)
 
@@ -195,5 +193,5 @@ class SettingsDialog(tkinter.Toplevel):
             piactl_executable=Path(self.piactl_executable.get().strip()),
             convert_to_mp3=self.convert_to_mp3.get(),
             mp3_bitrate=mp3_bitrate,
-            ffmpeg_executable=self.ffmpeg_executable.get().strip() or "ffmpeg",
+            ffmpeg_executable=self.ffmpeg_executable.get().strip(),
         )

@@ -84,9 +84,7 @@ class SockseekDownloader:
         :raises DownloadError: If sockseek is missing or the output folder cannot be used
         """
         if not self.settings.sockseek_executable.is_file():
-            raise DownloadError(
-                f"sockseek was not found at {self.settings.sockseek_executable}. See vendor/sockseek/README.md."
-            )
+            raise DownloadError(f"sockseek was not found at {self.settings.sockseek_executable}.")
         try:
             self.settings.output_directory.mkdir(parents=True, exist_ok=True)
         except OSError as error:

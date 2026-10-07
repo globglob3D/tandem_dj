@@ -2,9 +2,10 @@
 Conversion of audio files to MP3, through ffmpeg.
 """
 
-import shutil
 import subprocess
 from pathlib import Path
+
+from tandem_dj.paths import find_ffmpeg
 
 MP3_EXTENSION = ".mp3"
 CONVERTIBLE_EXTENSIONS = (
@@ -39,14 +40,14 @@ def convert_to_mp3(source_path: Path, ffmpeg_executable: str, bitrate_kbps: int)
     only deleted once the MP3 exists; an existing MP3 of the same name is never overwritten.
 
     :param source_path: Audio file to convert
-    :param ffmpeg_executable: Name or path of the ffmpeg program
+    :param ffmpeg_executable: Name or path of the ffmpeg program, empty for the one shipped with the application
     :param bitrate_kbps: Bitrate of the MP3, in kbps
     :returns: Path of the MP3 file
     :raises ConversionError: If ffmpeg is missing, the MP3 already exists, or the conversion fails
     """
-    ffmpeg_path = shutil.which(ffmpeg_executable)
+    ffmpeg_path = find_ffmpeg(ffmpeg_executable)
     if ffmpeg_path is None:
-        raise ConversionError(f"ffmpeg was not found ({ffmpeg_executable}); set its path in the [conversion] settings.")
+        raise ConversionError(f"ffmpeg was not found ({ffmpeg_executable or 'none is shipped'}); see the settings.")
     target_path = source_path.with_suffix(MP3_EXTENSION)
     if target_path.exists():
         raise ConversionError(f"{target_path.name} already exists, so {source_path.name} was left as it is.")
