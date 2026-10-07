@@ -171,6 +171,18 @@ def test_youtube_entry_becomes_track():
     )
 
 
+def test_youtube_video_of_a_whole_album_is_marked_as_one():
+    """
+    A video presented as a full album keeps that information once its title is cleaned, so that it can be searched
+    as an album when no single file matches it.
+    """
+    track = _track_from_entry(
+        {"title": "Boards of Canada - Geogaddi (Full Album)", "channel": "Some Uploader", "duration": 3960}
+    )
+    assert (track.artists, track.title, track.may_be_album) == (("Boards of Canada",), "Geogaddi", True)
+    assert not _track_from_entry({"title": "Darude - Feel the Beat", "channel": "Darude", "duration": 259}).may_be_album
+
+
 def test_youtube_topic_channel_names_the_artist():
     """
     Auto-generated "Topic" channels carry a bare song title and a trustworthy artist.

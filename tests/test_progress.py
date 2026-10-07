@@ -311,6 +311,67 @@ def test_only_the_tracks_that_are_expected_are_followed():
     assert tracker.summary().failed_count == 0
 
 
+def test_the_files_of_an_album_count_towards_the_entry_it_stands_for():
+    """
+    While an album is downloaded for an entry, the events about its files, which carry their own titles, move the
+    entry forward and never touch the other tracks, even one named like a song of the album. The entry ends as
+    downloaded with the folder of the album, or as failed with what was searched.
+    """
+    long_video = Track(artists=("Boards of Canada",), title="Geogaddi", duration_seconds=3960)
+    song_of_the_album = Track(artists=("Boards of Canada",), title="Gyroscope")
+    tracker = ProgressTracker([long_video, song_of_the_album])
+    tracker.follow_album(long_video, "Boards of Canada - Geogaddi")
+    searching = tracker.snapshot()[0]
+    assert (searching.status, searching.album_query) == (STATUS_SEARCHING, "Boards of Canada - Geogaddi")
+    assert searching.detail == 'not found as a song, searching for the album "Boards of Canada - Geogaddi"'
+
+    folder = "music\\Boards of Canada - Geogaddi (2002)\\"
+    for title, file_name in (("Music Is Math", "02 - Music Is Math.mp3"), ("Gyroscope", "04 - Gyroscope.mp3")):
+        tracker.handle_line(
+            event(
+                "download_start",
+                12.0,
+                artist="Boards of Canada",
+                title=title,
+                username="collector",
+                filename=folder + file_name,
+                size=6_000_000,
+            )
+        )
+    tracker.handle_line(
+        event(
+            "track_state",
+            20.0,
+            artist="Boards of Canada",
+            title="Gyroscope",
+            lifecycleState="Terminal",
+            terminalOutcome="Succeeded",
+            filename=folder + "04 - Gyroscope.mp3",
+            size=6_000_000,
+        )
+    )
+    album_entry, song_entry = tracker.snapshot()
+    assert (album_entry.status, album_entry.percent, album_entry.sources) == (STATUS_DOWNLOADING, 50, ("collector",))
+    assert album_entry.detail == "album from collector: Boards of Canada - Geogaddi (2002) (1 of 2 files)"
+    assert song_entry.status == STATUS_WAITING
+
+    tracker.finish_album(long_video, "D:/music/Boards of Canada - Geogaddi (2002)", 2)
+    album_entry = tracker.snapshot()[0]
+    assert (album_entry.status, album_entry.percent, album_entry.detail) == (STATUS_DOWNLOADED, 100, "album of 2 files")
+    assert album_entry.saved_path == "D:/music/Boards of Canada - Geogaddi (2002)"
+
+    tracker.handle_line(event("search_start", 30.0, artist="Boards of Canada", title="Gyroscope"))
+    assert tracker.snapshot()[1].status == STATUS_SEARCHING
+
+    tracker.follow_album(song_of_the_album, "Boards of Canada - Gyroscope")
+    tracker.finish_album(song_of_the_album)
+    failed = tracker.snapshot()[1]
+    assert (failed.status, failed.detail) == (
+        STATUS_FAILED,
+        'not found as a song, and no album "Boards of Canada - Gyroscope" could be downloaded',
+    )
+
+
 def test_summary_counts_and_estimates_time_left():
     """
     The summary counts outcomes and extrapolates the time left from the tracks worked on so far.

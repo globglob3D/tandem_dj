@@ -9,11 +9,19 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from tandem_dj.album_search import AlbumSearch, album_searches, looks_like_album
 from tandem_dj.config import Settings
 from tandem_dj.conversion import ConversionError, convert_to_mp3, needs_conversion
 from tandem_dj.models import Track
 from tandem_dj.search_variants import SearchVariant, relaxed_search_variants
-from tandem_dj.sockseek import DownloadReport, SockseekDownloader, forget_downloads, record_downloads
+from tandem_dj.sockseek import (
+    AlbumDownload,
+    DownloadReport,
+    SockseekDownloader,
+    forget_downloads,
+    list_audio_files,
+    record_downloads,
+)
 from tandem_dj.text_cleaning import track_key
 from tandem_dj.vpn import (
     VPN_MODE_NONE,
@@ -49,6 +57,8 @@ Confirm = Callable[[str], bool]
 OutputLineReceiver = Callable[[str], None]
 SearchVariantsReceiver = Callable[[Mapping[Track, SearchVariant]], None]
 RequestReceiver = Callable[["TrackRequest"], None]
+AlbumSearchReceiver = Callable[[Track, AlbumSearch], None]
+AlbumResultReceiver = Callable[[Track, AlbumDownload | None], None]
 
 
 def run_download(
@@ -64,12 +74,15 @@ def run_download(
     request: "TrackRequest | None" = None,
     control: "DownloadControl | None" = None,
     on_request: RequestReceiver | None = None,
+    on_album_search: AlbumSearchReceiver | None = None,
+    on_album_result: AlbumResultReceiver | None = None,
 ) -> DownloadReport:
     """
     Download tracks into the folder of their batch with the protection chosen in the settings, then convert the
     files that are not MP3.
 
-    Tracks that are not found are searched again under simpler spellings, when the settings allow it. The requests
+    Tracks that are not found are searched again under simpler spellings, and the ones that look like a whole
+    album are then searched as an album, when the settings allow it. The requests
     queued in ``control`` meanwhile are fulfilled before the protection ends, so that asking for one more track
     during a download costs no second connection of the VPN.
 
@@ -87,6 +100,8 @@ def run_download(
     :param request: How to download the tracks, when it is not the plain way; its tracks replace ``tracks``
     :param control: Where further requests are taken from, and what lets another thread act on the download
     :param on_request: Told each request right before it is fulfilled
+    :param on_album_search: Told which album an entry is about to be searched as
+    :param on_album_result: Told how the search of an album ended: the album that was saved, or ``None``
     :returns: The outcome of every requested track, with converted file names
     :raises DownloadError: If sockseek or the download folder is not available
     :raises VpnError: If the VPN cannot be connected or confirmed
@@ -108,7 +123,17 @@ def run_download(
             if on_request is not None:
                 on_request(next_request)
             report.merge(
-                fulfil_request(downloader, next_request, name, notify, may_continue, on_output_line, on_search_variants)
+                fulfil_request(
+                    downloader,
+                    next_request,
+                    name,
+                    notify,
+                    may_continue,
+                    on_output_line,
+                    on_search_variants,
+                    on_album_search,
+                    on_album_result,
+                )
             )
             if report.stopped_early or control is None or (may_continue is not None and not may_continue()):
                 break
@@ -134,12 +159,14 @@ class TrackRequest:
     :param preferred_sources: Soulseek users whose files are picked first
     :param avoided_sources: Soulseek users whose files are not considered
     :param replace_files: Whether a track that already has a file is downloaded again, the new file replacing it
+    :param as_albums: Whether each track is searched as a whole album straight away, without looking for a song
     """
 
     tracks: tuple[Track, ...]
     preferred_sources: tuple[str, ...] = ()
     avoided_sources: tuple[str, ...] = ()
     replace_files: bool = False
+    as_albums: bool = False
 
 
 class DownloadControl:
@@ -225,13 +252,16 @@ def fulfil_request(
     keep_running: Callable[[], bool] | None = None,
     on_output_line: OutputLineReceiver | None = None,
     on_search_variants: SearchVariantsReceiver | None = None,
+    on_album_search: AlbumSearchReceiver | None = None,
+    on_album_result: AlbumResultReceiver | None = None,
 ) -> DownloadReport:
     """
-    Download the tracks of one request: under their exact name, then under simpler spellings when the settings
-    allow it, from the sources the request prefers and never from the ones it avoids.
+    Download the tracks of one request: under their exact name, then under simpler spellings and as whole albums
+    when the settings allow it, from the sources the request prefers and never from the ones it avoids.
 
     When the request replaces files, the tracks that already have one are downloaded again. The earlier file of
-    such a track is deleted once another one was downloaded, and stays the file of the track otherwise.
+    such a track is deleted once another one was downloaded, and stays the file of the track otherwise. A request
+    for albums searches each of its tracks as an album only.
 
     :param downloader: Downloader configured with the user settings
     :param request: Tracks to download, and how
@@ -240,17 +270,37 @@ def fulfil_request(
     :param keep_running: Condition to keep sockseek running
     :param on_output_line: Receiver of every line sockseek prints
     :param on_search_variants: Told which spelling each track is searched under, before every further search
+    :param on_album_search: Told which album an entry is about to be searched as
+    :param on_album_result: Told how the search of an album ended
     :returns: The outcome of every track of the request
     """
     settings = downloader.settings
     earlier_files = forget_downloads(settings.index_path, request.tracks) if request.replace_files else {}
     downloader.preferred_sources, downloader.avoided_sources = request.preferred_sources, request.avoided_sources
     try:
-        report = downloader.download(request.tracks, name, keep_running, on_output_line)
-        if settings.relaxed_search:
-            search_failed_tracks_again(
-                downloader, report, name, notify, keep_running, on_output_line, on_search_variants
-            )
+        if request.as_albums:
+            report = DownloadReport(failed=list(request.tracks))
+            album_candidates = list(request.tracks)
+        else:
+            report = downloader.download(request.tracks, name, keep_running, on_output_line)
+            if settings.relaxed_search:
+                search_failed_tracks_again(
+                    downloader, report, name, notify, keep_running, on_output_line, on_search_variants
+                )
+            album_candidates = [track for track in report.failed if looks_like_album(track)]
+            if not settings.album_search:
+                album_candidates = []
+        download_albums(
+            downloader,
+            report,
+            album_candidates,
+            name,
+            notify,
+            keep_running,
+            on_output_line,
+            on_album_search,
+            on_album_result,
+        )
     except Exception:
         record_downloads(settings.index_path, earlier_files)
         raise
@@ -260,30 +310,101 @@ def fulfil_request(
     return report
 
 
+def download_albums(
+    downloader: SockseekDownloader,
+    report: DownloadReport,
+    tracks: Sequence[Track],
+    name: str,
+    notify: Notify,
+    keep_running: Callable[[], bool] | None = None,
+    on_output_line: OutputLineReceiver | None = None,
+    on_album_search: AlbumSearchReceiver | None = None,
+    on_album_result: AlbumResultReceiver | None = None,
+) -> None:
+    """
+    Search entries of the track list as whole albums, one after the other, and download the albums found.
+
+    What tells an album from a song is what Soulseek answers: the entry is an album when a shared folder of
+    several songs carries its name. Such an entry moves from the failed to the downloaded tracks of the report,
+    with the folder of its album as its file.
+
+    :param downloader: Downloader configured with the user settings
+    :param report: Outcome so far, in which the tracks count as failed; updated in place
+    :param tracks: Entries to search as albums
+    :param name: Name of the batch
+    :param notify: Receiver of progress messages
+    :param keep_running: Condition to keep searching; no search starts once it returns ``False``
+    :param on_output_line: Receiver of every line sockseek prints
+    :param on_album_search: Told which album an entry is about to be searched as
+    :param on_album_result: Told how the search of an album ended
+    """
+    for track in tracks:
+        album = None
+        for search in album_searches(track):
+            if report.stopped_early or (keep_running is not None and not keep_running()):
+                return
+            notify(
+                f'{track.display_name}: not found as a song, searching for the album "{search.query}" '
+                f"({search.description})...",
+                LEVEL_INFORMATION,
+            )
+            if on_album_search is not None:
+                on_album_search(track, search)
+            album, stopped_early = downloader.download_album(track, search, name, keep_running, on_output_line)
+            report.stopped_early = report.stopped_early or stopped_early
+            if on_album_result is not None:
+                on_album_result(track, album)
+            if album is not None:
+                break
+        if album is None:
+            report.notes[track] = "not found as a song, and no album of that name could be downloaded"
+            continue
+        report.failed.remove(track)
+        report.downloaded.append(track)
+        report.saved_files[track] = album.folder
+        report.albums[track] = album
+        notify(
+            f'Downloaded as an album, by searching "{album.query}": {track.display_name}  ->  '
+            f"{len(album.files)} files in {Path(album.folder).name}. Check that it is the right album.",
+            LEVEL_WARNING,
+        )
+
+
 def convert_downloads(report: DownloadReport, settings: Settings, notify: Notify) -> None:
     """
-    Convert every file of a download run that is not an MP3, recording the new file names in the report.
+    Convert every file of a download run that is not an MP3, the files of albums included, recording the new file
+    names in the report.
 
     :param report: Outcome of the run; its saved file paths are updated in place
     :param settings: User settings holding the conversion preferences
     :param notify: Receiver of progress messages
     """
-    other_format_files = {
-        track: Path(file_path)
+    other_format_files = [
+        (track, Path(file_path))
         for track, file_path in report.saved_files.items()
         if file_path and needs_conversion(Path(file_path)) and Path(file_path).is_file()
-    }
+    ]
+    other_format_files += [
+        (track, Path(file_path))
+        for track, album in report.albums.items()
+        for file_path in album.files
+        if needs_conversion(Path(file_path)) and Path(file_path).is_file()
+    ]
     if not other_format_files:
         return
     notify(f"Converting {len(other_format_files)} files to MP3 {settings.mp3_bitrate} kbps...", LEVEL_INFORMATION)
-    for track, source_path in other_format_files.items():
+    for track, source_path in other_format_files:
         try:
             target_path = convert_to_mp3(source_path, settings.mp3_bitrate)
         except ConversionError as error:
             notify(f"Conversion: {error}", LEVEL_WARNING)
             continue
-        report.saved_files[track] = str(target_path)
+        if track not in report.albums:
+            report.saved_files[track] = str(target_path)
         notify(f"Converted {source_path.name}  ->  {target_path.name}  (original deleted)", LEVEL_INFORMATION)
+    for track, album in report.albums.items():
+        files = tuple(list_audio_files(Path(album.folder)))
+        report.albums[track] = AlbumDownload(folder=album.folder, files=files, query=album.query)
 
 
 def search_failed_tracks_again(
@@ -388,6 +509,11 @@ def _settle_replaced_files(
         earlier_path = Path(earlier_file)
         if track in report.downloaded:
             new_path = Path(report.saved_files[track])
+            if earlier_path.is_dir() and earlier_path.resolve() != new_path.resolve():
+                notify(
+                    f"{track.display_name}: the album folder {earlier_path.name} it had before was left in place.",
+                    LEVEL_INFORMATION,
+                )
             if earlier_path.is_file() and earlier_path.resolve() != new_path.resolve():
                 with contextlib.suppress(OSError):
                     earlier_path.unlink()

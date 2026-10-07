@@ -23,10 +23,11 @@ from tandem_dj.progress import (
     ProgressTracker,
 )
 from tandem_dj.search_variants import SearchVariant
-from tandem_dj.sockseek import DownloadReport
+from tandem_dj.sockseek import AlbumDownload, DownloadReport
 from tandem_dj.source_history import read_tried_sources, source_history_path
 from tandem_dj.ui import main_window
 from tandem_dj.ui.main_window import (
+    MENU_ALBUM,
     MENU_DOWNLOAD,
     MENU_DOWNLOAD_AGAIN,
     MENU_LEAVE_SOURCE,
@@ -277,6 +278,7 @@ def test_right_click_menu_offers_what_applies_to_the_selected_tracks(window, tmp
     assert menu_states(window) == {
         MENU_DOWNLOAD: True,
         MENU_OTHER_SOURCE: False,
+        MENU_ALBUM: True,
         MENU_LEAVE_SOURCE: False,
         MENU_SHOW_FILE: False,
         "Copy artist and title": True,
@@ -349,6 +351,41 @@ def test_asking_for_tracks_again_queues_a_request_and_marks_their_rows(window, n
     assert (cells(window, 0)["status"], cells(window, 0)["detail"]) == (STATUS_FAILED, "not found or failed")
     assert cells(window, 1)["status"] == STATUS_ALREADY_DOWNLOADED
     assert cells(window, 1)["detail"].startswith("already have Darude - Feel the Beat.mp3")
+
+
+def test_an_entry_downloaded_as_an_album_is_flagged_and_names_its_folder(window, no_worker, tmp_path):
+    """
+    A track can be asked as an album from the menu. An entry downloaded as an album stands out in the table, says
+    how many files were saved in which folder and what was searched, and counts as having a file.
+    """
+    album_folder = tmp_path / "Son 2 Teuf - spotify - 2026-10-07 21-45-03" / "Skone - Afterlife EP (2019)"
+    album_folder.mkdir(parents=True)
+    files = tuple(str(album_folder / f"0{number} - Song.mp3") for number in (1, 2, 3))
+    collection = TrackCollection(name="Son 2 Teuf", origin="spotify", tracks=[SKONE, DARUDE])
+    window._show_tracks(collection, [SKONE, DARUDE], duplicate_count=0, already_downloaded={})
+    select(window, SKONE)
+    window._on_download_as_album()
+    assert cells(window, 0)["detail"] == "queued: download as an album"
+    assert window.control.next_request() == TrackRequest((SKONE,), as_albums=True)
+
+    report = DownloadReport(
+        downloaded=[SKONE],
+        failed=[DARUDE],
+        saved_files={SKONE: str(album_folder)},
+        albums={SKONE: AlbumDownload(folder=str(album_folder), files=files, query="Skone - Afterlife")},
+        notes={DARUDE: "not found as a song, and no album of that name could be downloaded"},
+    )
+    window._show_report(report, album_folder.parent)
+    assert cells(window, 0)["status"] == "Downloaded - album"
+    assert cells(window, 0)["detail"] == (
+        "album of 3 files saved in the folder Skone - Afterlife EP (2019), "
+        'found by searching "Skone - Afterlife": check it'
+    )
+    assert cells(window, 1)["detail"] == "not found as a song, and no album of that name could be downloaded"
+    assert "1 downloaded (1 as whole albums: check them)" in window.summary_label.cget("text")
+    assert window._has_file(SKONE)
+    window._on_select_missing()
+    assert window._selected_tracks() == [DARUDE]
 
 
 def test_a_file_is_only_replaced_when_the_user_agrees(window, no_worker, monkeypatch, tmp_path):
@@ -650,6 +687,7 @@ def test_settings_dialog_saves_the_edited_settings(window):
     dialog.preferred_formats.set("flac, mp3")
     dialog.vpn_mode.set(VPN_MODE_PIA)
     dialog.silent_source_seconds.set("12")
+    dialog.album_search.set(False)
     dialog._on_save()
     saved_settings = load_settings(window.config_path)
     assert dialog.saved_settings == saved_settings
@@ -658,3 +696,4 @@ def test_settings_dialog_saves_the_edited_settings(window):
     assert saved_settings.vpn_mode == VPN_MODE_PIA
     assert saved_settings.name_format == "{sartist} - {stitle}"
     assert saved_settings.silent_source_seconds == 12
+    assert saved_settings.album_search is False

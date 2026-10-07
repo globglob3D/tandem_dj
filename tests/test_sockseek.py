@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tandem_dj.album_search import AlbumSearch
 from tandem_dj.config import Settings
 from tandem_dj.models import Track
 from tandem_dj.paths import bundled_sockseek
@@ -62,6 +63,21 @@ def make_downloader(settings: Settings) -> SockseekDownloader:
     :returns: The downloader
     """
     return SockseekDownloader(settings, settings.output_directory / BATCH_FOLDER_NAME)
+
+
+def share_album(shared_files: Path) -> Path:
+    """
+    Create a folder standing for an album shared on Soulseek: four songs and a cover picture.
+
+    :param shared_files: Folder sockseek searches instead of the Soulseek network
+    :returns: The folder of the album
+    """
+    album_folder = shared_files / "Boards of Canada - Geogaddi (2002)"
+    album_folder.mkdir(parents=True)
+    for name in ("01 - Ready Lets Go", "02 - Music Is Math", "03 - Beware the Friendly Stranger", "04 - Gyroscope"):
+        (album_folder / f"{name}.mp3").write_bytes(b"not really audio")
+    (album_folder / "cover.jpg").write_bytes(b"not really a picture")
+    return album_folder
 
 
 def save_file(path: Path) -> str:
@@ -118,6 +134,22 @@ def test_build_command_names_the_sources_to_prefer_and_to_avoid(tmp_path):
     assert command[command.index("--banned-users") + 1] == "slow peer,dead peer"
     assert command[command.index("--pref-allowed-users") + 1] == "good peer"
     assert downloader.skipped_sources == ("dead peer",)
+
+
+def test_build_command_for_an_album_keeps_its_folder_and_asks_for_several_songs(tmp_path):
+    """
+    An album is saved under the folder and file names it has on Soulseek, must hold at least two songs, and
+    leaves nothing behind when it arrives incomplete. The file naming pattern of single tracks is not used.
+    """
+    downloader = make_downloader(make_settings(tmp_path))
+    command = downloader.build_command(tmp_path / "input.csv", album=True)
+    for flag, value in [
+        ("--name-format", "{slsk-foldername}/{slsk-filename}"),
+        ("--min-album-track-count", "2"),
+        ("--incomplete-album-action", "delete"),
+    ]:
+        assert command[command.index(flag) + 1] == value
+    assert "--min-album-track-count" not in downloader.build_command(tmp_path / "input.csv")
 
 
 def test_describe_command_hides_the_password(tmp_path):
@@ -299,6 +331,35 @@ def test_forgetting_downloads_makes_tracks_new_again_and_tells_their_files(tmp_p
     assert forget_downloads(tmp_path / "missing.csv", [forgotten]) == {}
 
 
+def test_history_reads_paths_inside_its_folder_and_album_folders(tmp_path):
+    """
+    Sockseek writes a path inside the folder of the index relative to it, and an entry downloaded as an album
+    points to a folder: both count as downloaded, the folder only while it holds something.
+    """
+    index_path = tmp_path / "data" / "index.csv"
+    nearby_file = save_file(tmp_path / "data" / "music" / "nearby.mp3")
+    album_folder = tmp_path / "output" / "Some Album (2002)"
+    save_file(album_folder / "01 - First Song.mp3")
+    empty_folder = tmp_path / "output" / "Emptied Album"
+    empty_folder.mkdir()
+    index_path.write_text(
+        "filepath,artist,album,title,length,tracktype,state,failurereason\n"
+        "./music/nearby.mp3,Close Artist,,Nearby Song,-1,0,1,0\n"
+        f"{album_folder.as_posix()},Album Artist,,Some Album,-1,0,1,0\n"
+        f"{empty_folder.as_posix()},Album Artist,,Emptied Album,-1,0,1,0\n",
+        encoding="utf-8",
+    )
+    nearby = Track(artists=("Close Artist",), title="Nearby Song")
+    album = Track(artists=("Album Artist",), title="Some Album")
+    emptied = Track(artists=("Album Artist",), title="Emptied Album")
+    found_files = find_already_downloaded([nearby, album, emptied], index_path)
+    assert {track: Path(file_path) for track, file_path in found_files.items()} == {
+        nearby: Path(nearby_file),
+        album: album_folder,
+    }
+    assert repair_index(index_path) == 1
+
+
 def test_run_while_stops_the_program_when_the_condition_fails():
     """
     A program is stopped at the first check where the condition to keep running no longer holds.
@@ -422,6 +483,54 @@ def test_skipping_a_source_starts_sockseek_again_without_it(tmp_path):
     assert [track_list["total"] for track_list in track_lists] == [6, 6 - len(report.downloaded)]
     command = downloader.build_command(downloader.input_path_for("skipped source"))
     assert command[command.index("--banned-users") + 1] == "local"
+
+
+@pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file(), reason="sockseek is not installed in vendor/sockseek")
+def test_album_is_saved_in_a_folder_of_its_own_and_remembered(tmp_path):
+    """
+    An entry searched as an album gets every file of the shared folder, under their own names, in a folder named
+    like it inside the folder of the batch. The history then holds the entry, so the next run skips it. A single
+    song is not taken for an album.
+    """
+    shared_files = tmp_path / "shared"
+    share_album(shared_files)
+    (shared_files / "Darude - Feel the Beat.mp3").write_bytes(b"not really audio")
+    settings = make_settings(
+        tmp_path, extra_arguments=("--mock-files-dir", str(shared_files), "--mock-files-no-read-tags", "--no-progress")
+    )
+    downloader = make_downloader(settings)
+    long_video = Track(artists=("Boards of Canada",), title="Geogaddi", duration_seconds=3960, may_be_album=True)
+    single = Track(artists=("Darude",), title="Feel the Beat")
+
+    assert downloader.download_album(single, AlbumSearch("Darude", "Feel the Beat", "as written"), "albums") == (
+        None,
+        False,
+    )
+    assert not downloader.batch_directory.exists()
+
+    album, stopped_early = downloader.download_album(
+        long_video, AlbumSearch("Boards of Canada", "Geogaddi", "as written"), "albums"
+    )
+    album_folder = downloader.batch_directory / "Boards of Canada - Geogaddi (2002)"
+    assert not stopped_early
+    assert (Path(album.folder), album.query) == (album_folder, "Boards of Canada - Geogaddi")
+    assert [Path(file_path).name for file_path in album.files] == [
+        "01 - Ready Lets Go.mp3",
+        "02 - Music Is Math.mp3",
+        "03 - Beware the Friendly Stranger.mp3",
+        "04 - Gyroscope.mp3",
+    ]
+    assert sorted(path.name for path in album_folder.iterdir())[-1] == "cover.jpg"
+    assert [path.name for path in downloader.batch_directory.iterdir()] == [album_folder.name]
+    assert [path.name for path in settings.index_path.parent.joinpath("inputs").iterdir()] == [
+        "albums_album_search.csv"
+    ]
+
+    assert Path(find_already_downloaded([long_video], settings.index_path)[long_video]) == album_folder
+    later_downloader = SockseekDownloader(settings, settings.output_directory / "later batch")
+    report = later_downloader.download([long_video, single], "albums")
+    assert (report.already_downloaded, report.downloaded) == ([long_video], [single])
+    assert Path(report.saved_files[long_video]) == album_folder
 
 
 def test_repair_index_keeps_the_most_conclusive_row_per_track(tmp_path):

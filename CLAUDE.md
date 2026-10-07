@@ -43,6 +43,7 @@ src/tandem_dj/
   models.py          Track, TrackCollection
   text_cleaning.py   upload title cleaning and "Artist - Title" splitting (shared by YouTube, SoundCloud, text)
   search_variants.py relaxed_search_variants(): simpler spellings of a track that was not found
+  album_search.py    looks_like_album(), album_searches(): entries that may be whole albums and what to search
   sockseek.py        SockseekDownloader: CSV input file, command line, report from the sockseek index
   vpn.py             VPN modes; VpnGuard (Private Internet Access through piactl), AddressWatch (no VPN handled)
   conversion.py      convert_to_mp3(): any other audio format to MP3 through ffmpeg
@@ -86,9 +87,12 @@ macOS. It holds `config.toml` (with the Soulseek password), `data/sockseek_index
    `keep_running=guard.is_connected` stops sockseek if the VPN drops.
 4. Still inside the VPN protection, `search_failed_tracks_again()` runs up to four more sockseek passes on the
    tracks in `report.failed`, each under its next `SearchVariant` (see "Relaxed search" below).
-5. After the VPN is off again, files among `report.saved_files` that are not MP3 are converted to MP3.
+5. Still inside the VPN protection, `download_albums()` searches as albums the tracks that are still in
+   `report.failed` and look like one (see "Albums" below).
+6. After the VPN is off again, files among `report.saved_files` that are not MP3 are converted to MP3, the files
+   of albums included.
 
-Steps 3 to 5 are `workflow.run_download()`. It reports through a `notify(message, level)` callback, which the
+Steps 3 to 6 are `workflow.run_download()`. It reports through a `notify(message, level)` callback, which the
 window sends to its log pane and to the log file, and asks the user through a `confirm(question)` callback.
 
 Step 3 depends on `Settings.vpn_mode`:
@@ -214,6 +218,36 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 - Measured in sockseek's mock mode: searching `Artiste - L'arrêt sur image` finds `L arret sur image.mp3` and
   `Larret sur image.mp3` but not `artiste_-_arret_sur_image.mp3`; searching `arret sur image` finds the latter.
   Underscores and hyphens in file names need no variant. `--desperate` changed nothing there.
+
+### Albums
+
+- The user asked for this: a playlist entry that is really a whole album (a long YouTube video) should give every
+  song of the album, **and Soulseek's answer decides** whether it is one. An entry only counts as an album when
+  sockseek finds a shared folder of at least `MINIMUM_ALBUM_TRACKS` (2) songs for it.
+- `looks_like_album()` picks the candidates among the tracks that failed as songs: `Track.may_be_album` (set by
+  the YouTube and SoundCloud readers from the raw title, through `announces_album()`, since cleaning the title
+  removes "(Full Album)") or a length of 15 minutes or more. Without one of those hints nothing is searched as an
+  album automatically: a failed single whose title is also the name of a release would bring a whole folder.
+  The menu entry "Download as an album" does it for any track (`TrackRequest.as_albums`), skipping the song search.
+- `album_searches()` gives the spellings to try: `track.album` when the source knows it (Spotify), otherwise the
+  title without the announcement, bracketed years and decorations; then the same without accents and punctuation.
+  An unsure artist (an uploader name) is left out.
+- `SockseekDownloader.download_album()` runs sockseek **once per album**, on a CSV row with an empty `Title`
+  (which is what makes sockseek treat a row as an album), with an index of its own, `--min-album-track-count 2`,
+  `--incomplete-album-action delete` and the name format `{slsk-foldername}/{slsk-filename}`. That saves the
+  album as `<folder of the batch>/<shared folder name>/<original file names>`; without a name format sockseek adds
+  a folder named after the input file in between. `record_downloads()` then marks the entry as downloaded in the
+  history **under its real name, with the folder as its file**. `read_index()` accepts a folder while it holds
+  something, so "already downloaded" works for albums like for songs.
+- One album per run, because sockseek's progress events only describe the files of an album (as songs, with
+  titles taken from the file names) and never the album job itself: with one album at a time, every event of the
+  run belongs to it. `ProgressTracker.follow_album()` counts all events towards the entry until `finish_album()`,
+  so a file of the album named like another track of the list cannot touch that track.
+- The report holds `albums[track] = AlbumDownload(folder, files, query)` and `saved_files[track] = folder`. The
+  window shows `Downloaded - album` (`theme.STATUS_ALBUM`); keep that flag visible like the relaxed search one.
+- Measured in mock mode: an album row whose search only matches single files fails with `NoMatchingResults`;
+  the cover picture of a folder is downloaded with the songs; a path inside the folder of the index is written
+  to the index as `./relative/path`, which `_locate_saved_file()` resolves.
 
 ### Logs and debugging
 

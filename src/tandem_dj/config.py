@@ -35,6 +35,8 @@ class Settings:
     :param preferred_minimum_bitrate: Bitrate, in kbps, below which a file is only a fallback
     :param relaxed_search: Whether tracks that are not found are searched again under simpler spellings
     :param silent_source_seconds: Time a source may send nothing before sockseek drops it for the next one
+    :param album_search: Whether an entry that looks like a whole album and is not found as a song is searched,
+        and downloaded, as an album
     :param sockseek_executable: Path of the sockseek program
     :param index_path: Path of the download history kept by sockseek
     :param extra_arguments: Extra sockseek flags appended to every run
@@ -59,6 +61,7 @@ class Settings:
     mp3_bitrate: int = 320
     relaxed_search: bool = True
     silent_source_seconds: int = DEFAULT_SILENT_SOURCE_SECONDS
+    album_search: bool = True
 
 
 def load_settings(config_path: Path | None = None) -> Settings:
@@ -106,6 +109,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
         silent_source_seconds=max(
             int(download.get("silent_source_seconds", DEFAULT_SILENT_SOURCE_SECONDS)), MINIMUM_SILENT_SOURCE_SECONDS
         ),
+        album_search=bool(download.get("album_search", True)),
     )
 
 
@@ -156,6 +160,7 @@ def save_settings(settings: Settings, config_path: Path | None = None) -> Path:
             mp3_bitrate=settings.mp3_bitrate,
             relaxed_search=_boolean(settings.relaxed_search),
             silent_source_seconds=settings.silent_source_seconds,
+            album_search=_boolean(settings.album_search),
         ),
         encoding="utf-8",
         newline="\n",
@@ -247,6 +252,10 @@ preferred_minimum_bitrate = {preferred_minimum_bitrate}
 # When true, tracks that are not found are searched again under simpler spellings: without accents, without
 # articles and punctuation, without decorations such as (Original Mix), and finally by title alone.
 relaxed_search = {relaxed_search}
+
+# When true, an entry that is not found as a song and looks like a whole album (announced as "full album", or 15
+# minutes long or more) is searched as an album: a folder of at least two songs, downloaded into a folder of its own.
+album_search = {album_search}
 
 # Seconds a source may send nothing before sockseek drops it and tries the next one. A lower value leaves a
 # transfer stuck at 0 kB/s sooner; a higher one is more patient with sources that queue their uploads.

@@ -5,7 +5,8 @@ and batch-downloads the tracks from Soulseek as MP3 files, straight onto the USB
 named after its playlist.
 
 - For everyone: [Installing](#installing), [Using it](#using-it),
-  [Acting on single tracks](#acting-on-single-tracks), [When a track is not found](#when-a-track-is-not-found),
+  [Acting on single tracks](#acting-on-single-tracks), [Whole albums](#whole-albums),
+  [When a track is not found](#when-a-track-is-not-found),
   [When something goes wrong](#when-something-goes-wrong), [Where things are kept](#where-things-are-kept),
   [VPN](#vpn)
 - For developers: [How the websites are read](#how-the-websites-are-read),
@@ -69,10 +70,11 @@ What a download does, in order:
    needs every word to match a file path); the others appear in the notes column.
 3. **Tracks that were not found are searched again under simpler spellings** (see
    [When a track is not found](#when-a-track-is-not-found)).
-4. **The VPN is disconnected again**, unless it was already on before the run.
-5. **Other formats are converted to MP3**: when a track only exists as FLAC, WAV, AIFF, M4A, OGG, Opus or another
+4. **Entries that are really whole albums are downloaded as albums** (see [Whole albums](#whole-albums)).
+5. **The VPN is disconnected again**, unless it was already on before the run.
+6. **Other formats are converted to MP3**: when a track only exists as FLAC, WAV, AIFF, M4A, OGG, Opus or another
    format, it is converted to 320 kbps MP3 with its tags and cover art, and the original is deleted.
-6. **The result is listed**: each downloaded track with the file it was saved as, then what was not found, then
+7. **The result is listed**: each downloaded track with the file it was saved as, then what was not found, then
    the folder holding the files.
 
 ### Where the files go
@@ -90,7 +92,7 @@ Every download gets a new folder inside the download folder chosen in the settin
   folders.
 - Characters a folder name cannot hold (`/ \ : * ? " < > |`) become spaces, and a very long playlist name is cut.
 - Inside the folder, files are named `Artist - Title.mp3` from their tags, without subfolders. A file without
-  tags keeps the name it had on Soulseek.
+  tags keeps the name it had on Soulseek. Only [whole albums](#whole-albums) get a subfolder each.
 - A track downloaded earlier, whose file is still there, is not fetched again (see below): it stays in the folder
   of the download that fetched it. The new folder holds only what is new, and no folder is created when nothing new
   was saved.
@@ -116,6 +118,7 @@ Select one or more tracks (Ctrl or Shift click for several, Ctrl+A for all) and 
 | --- | --- |
 | **Download** / **Download again** | Downloads only the selected tracks, without running the whole list again. A track that was tried before is asked first from the person it came from last time. |
 | **Download from another source** | Downloads the selected tracks from other people than the ones already tried for them: the next best source. Use it when a file is a bad rip or the wrong version, or when its source never answers. Only available once Tandem DJ knows who was tried, which it remembers from one launch to the next. With several tracks selected, the people tried for any of them are avoided for all of them. |
+| **Download as an album** | Searches each selected track as an album and downloads every song of it (see [Whole albums](#whole-albums)). For a track read from Spotify, that is the album the track is on. |
 | **Leave this source now** | During a download, for a track stuck at 0 kB/s: gives up the person it is being transferred from, for every track. sockseek cannot change source while it runs, so it is restarted on the tracks that are not downloaded yet; the other transfers in progress start over, finished tracks are kept. |
 | **Show the file in its folder** | Opens the folder of the track with its file selected. |
 | **Copy artist and title** | Copies the selected tracks as `Artist - Title` lines. |
@@ -131,6 +134,29 @@ Select one or more tracks (Ctrl or Shift click for several, Ctrl+A for all) and 
 - The files go into the folder of the last download of the list shown in the table.
 - A transfer stuck at 0 kB/s also resolves by itself: sockseek drops a source that sends nothing for 30 seconds
   and tries the next one (see **Drop a silent source after** in the settings).
+
+## Whole albums
+
+A playlist sometimes holds a whole album as one entry, typically a YouTube video called
+`Artist - Album (Full Album)` that lasts 45 minutes. Nobody shares a single file of that length, but the album
+itself is usually shared as a folder of songs. So, once the search for a song has failed:
+
+1. An entry is **taken for a possible album** when its title announced one (`full album`, `[EP]`...) or when it
+   lasts 15 minutes or more.
+2. It is **searched as an album**: `Artist - Album`, as written and then without accents and punctuation.
+3. **Soulseek decides**: the entry is an album when someone shares a folder of that name holding at least two
+   songs. Every file of the best folder is then downloaded. A single song is never taken for an album.
+4. The album is saved in **a folder of its own inside the folder of the download**, named like the shared folder,
+   with the file names it has on Soulseek (`01 - First Song.mp3`...), so the order of the songs is kept. Songs in
+   another format are converted to MP3 like any other download.
+5. The entry is shown as **Downloaded - album** in amber, with the number of files, the folder and the search
+   that found it: check that it is the right album. It is remembered like any download and not fetched again
+   while its folder still holds something.
+
+- Any track can be asked as an album by hand: right-click it and choose **Download as an album**.
+- An album that arrives incomplete is deleted and counts as not downloaded.
+- Each album costs one more sockseek run, done one after the other. Switch the automatic search off with the
+  "Download the whole album when a long entry... is not found as a song" setting.
 
 ## When a track is not found
 

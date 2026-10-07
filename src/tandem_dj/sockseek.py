@@ -17,8 +17,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO
 
+from tandem_dj.album_search import MINIMUM_ALBUM_TRACKS, AlbumSearch
 from tandem_dj.config import Settings
-from tandem_dj.conversion import MP3_EXTENSION
+from tandem_dj.conversion import CONVERTIBLE_EXTENSIONS, MP3_EXTENSION
 from tandem_dj.models import Track
 from tandem_dj.search_variants import SearchVariant
 from tandem_dj.text_cleaning import track_key
@@ -26,6 +27,11 @@ from tandem_dj.text_cleaning import track_key
 INPUT_DIRECTORY_NAME = "inputs"
 RELAXED_INPUT_SUFFIX = "relaxed_search"
 RELAXED_INDEX_SUFFIX = ".index.csv"
+ALBUM_INPUT_SUFFIX = "album_search"
+ALBUM_NAME_FORMAT = "{slsk-foldername}/{slsk-filename}"
+INCOMPLETE_ALBUM_ACTION = "delete"
+INDEX_RELATIVE_PREFIX = "./"
+AUDIO_EXTENSIONS = (MP3_EXTENSION, *CONVERTIBLE_EXTENSIONS)
 STAGING_DIRECTORY_NAME = ".sockseek-staging"
 INPUT_COLUMNS = ("Artist", "Title", "Album", "Length")
 INDEX_COLUMNS = ("filepath", "artist", "album", "title", "length", "tracktype", "state", "failurereason")
@@ -144,6 +150,47 @@ class SockseekDownloader:
         variant_index_path.unlink(missing_ok=True)
         return saved_files, stopped_early
 
+    def download_album(
+        self,
+        track: Track,
+        search: AlbumSearch,
+        name: str,
+        keep_running: Callable[[], bool] | None = None,
+        on_output_line: Callable[[str], None] | None = None,
+    ) -> tuple["AlbumDownload | None", bool]:
+        """
+        Search an entry of the track list as a whole album, and download every file of the best folder found.
+
+        Sockseek runs once on that album alone, with an index of its own, and only accepts a folder holding
+        several songs. The files keep the names they have on Soulseek, in a folder named like the one they come
+        from, inside the folder of the batch. An album that arrives incomplete is deleted. The entry is then
+        marked as downloaded in the history, where it points to the folder of the album.
+
+        :param track: Entry of the track list the album stands for
+        :param search: Artist and album to search for
+        :param name: Name of the batch, used to name the generated sockseek input file
+        :param keep_running: Condition checked every few seconds; sockseek is stopped once it returns ``False``
+        :param on_output_line: Receiver of every line sockseek prints, called from a background thread
+        :returns: The album that was saved, ``None`` when no folder was found or downloaded, and whether sockseek
+            was stopped early
+        :raises DownloadError: If sockseek, the download folder or the folder of the batch is not available
+        """
+        self.check_ready()
+        input_path = self.input_path_for(f"{name} {ALBUM_INPUT_SUFFIX}")
+        album_index_path = input_path.with_suffix(RELAXED_INDEX_SUFFIX)
+        album_index_path.unlink(missing_ok=True)
+        rows = [{"Artist": search.artist, "Title": "", "Album": search.album, "Length": ""}]
+        _, stopped_early = self._run(rows, input_path, album_index_path, keep_running, on_output_line, album=True)
+        entry = read_index(album_index_path).get(track_key(search.artist, ""))
+        album_index_path.unlink(missing_ok=True)
+        if entry is None or not entry.is_downloaded:
+            return None, stopped_early
+        files = list_audio_files(Path(entry.file_path))
+        if not files:
+            return None, stopped_early
+        record_downloads(self.settings.index_path, {track: entry.file_path})
+        return AlbumDownload(folder=entry.file_path, files=tuple(files), query=search.query), stopped_early
+
     def skip_source(self, username: str) -> None:
         """
         Stop downloading from a Soulseek user, for the rest of the life of this downloader.
@@ -200,6 +247,7 @@ class SockseekDownloader:
         tracks: Sequence[Track] = (),
         emit_progress_events: bool = False,
         index_path: Path | None = None,
+        album: bool = False,
     ) -> list[str]:
         """
         Assemble the sockseek command line for one input file.
@@ -208,6 +256,8 @@ class SockseekDownloader:
         :param tracks: Tracks listed in the file; an unsure artist among them makes sockseek also search by title
         :param emit_progress_events: Whether sockseek prints its progress as JSON lines
         :param index_path: Index file sockseek reads and writes, the download history by default
+        :param album: Whether the file lists albums: each one is saved in a folder of its own, under the file
+            names it has on Soulseek, and must hold several songs
         :returns: The program path followed by its arguments
         """
         settings = self.settings
@@ -224,7 +274,7 @@ class SockseekDownloader:
             "--output-dir",
             str(self.batch_directory),
             "--name-format",
-            settings.name_format,
+            ALBUM_NAME_FORMAT if album else settings.name_format,
             "--index-path",
             str(index_path or settings.index_path),
             "--pref-min-bitrate",
@@ -242,6 +292,9 @@ class SockseekDownloader:
             command += ["--pref-allowed-users", SOURCE_SEPARATOR.join(preferred_sources)]
         if any(track.artist_is_uncertain for track in tracks):
             command.append("--artist-maybe-wrong")
+        if album:
+            command += ["--min-album-track-count", str(MINIMUM_ALBUM_TRACKS)]
+            command += ["--incomplete-album-action", INCOMPLETE_ALBUM_ACTION]
         if emit_progress_events:
             command.append("--progress-json")
         return command + list(settings.extra_arguments)
@@ -266,6 +319,7 @@ class SockseekDownloader:
         keep_running: Callable[[], bool] | None,
         on_output_line: Callable[[str], None] | None,
         tracks: Sequence[Track] = (),
+        album: bool = False,
     ) -> tuple[int, bool]:
         """
         Run sockseek on search rows, again each time a source is skipped meanwhile.
@@ -279,6 +333,7 @@ class SockseekDownloader:
         :param keep_running: Condition checked every few seconds; sockseek is stopped once it returns ``False``
         :param on_output_line: Receiver of every line sockseek prints
         :param tracks: Tracks behind the rows; an unsure artist among them makes sockseek also search by title
+        :param album: Whether the rows are albums
         :returns: ``(exit_code, stopped_early)`` of the last run; ``stopped_early`` only tells about ``keep_running``
         """
         pending_rows = list(rows)
@@ -287,7 +342,7 @@ class SockseekDownloader:
             self._create_batch_directory()
             write_input_rows(pending_rows, input_path)
             command = self.build_command(
-                input_path, tracks, emit_progress_events=on_output_line is not None, index_path=index_path
+                input_path, tracks, emit_progress_events=on_output_line is not None, index_path=index_path, album=album
             )
             exit_code, stopped_early = run_while(
                 command, keep_running, on_output_line=on_output_line, interrupted=self._restart_requested.is_set
@@ -339,6 +394,8 @@ class DownloadReport:
     :param relaxed_matches: Spelling that found each track which was not found under its exact name; such files
         deserve a check by the user
     :param notes: What else there is to tell the user about a track, shown in place of the usual details
+    :param albums: Album saved for each entry that was downloaded as a whole album; ``saved_files`` holds its
+        folder
     :param exit_code: Exit code of the sockseek process
     :param stopped_early: Whether sockseek was stopped because the condition to keep running stopped holding
     """
@@ -350,6 +407,7 @@ class DownloadReport:
     saved_files: dict[Track, str] = field(default_factory=dict)
     relaxed_matches: dict[Track, SearchVariant] = field(default_factory=dict)
     notes: dict[Track, str] = field(default_factory=dict)
+    albums: dict[Track, "AlbumDownload"] = field(default_factory=dict)
     exit_code: int = 0
     stopped_early: bool = False
 
@@ -371,7 +429,7 @@ class DownloadReport:
         later_tracks = set(later_report.tracks)
         for outcome in (self.downloaded, self.already_downloaded, self.failed, self.not_attempted):
             outcome[:] = [track for track in outcome if track not in later_tracks]
-        for details in (self.saved_files, self.relaxed_matches, self.notes):
+        for details in (self.saved_files, self.relaxed_matches, self.notes, self.albums):
             for track in later_tracks:
                 details.pop(track, None)
         self.downloaded += later_report.downloaded
@@ -381,8 +439,24 @@ class DownloadReport:
         self.saved_files.update(later_report.saved_files)
         self.relaxed_matches.update(later_report.relaxed_matches)
         self.notes.update(later_report.notes)
+        self.albums.update(later_report.albums)
         self.exit_code = later_report.exit_code
         self.stopped_early = self.stopped_early or later_report.stopped_early
+
+
+@dataclass(frozen=True)
+class AlbumDownload:
+    """
+    A whole album saved for one entry of the track list.
+
+    :param folder: Folder the album was saved in
+    :param files: Audio files of the album
+    :param query: What was searched for to find it
+    """
+
+    folder: str
+    files: tuple[str, ...]
+    query: str
 
 
 @dataclass(frozen=True)
@@ -391,7 +465,8 @@ class IndexEntry:
     What the sockseek index records about one track.
 
     :param state: Sockseek state code of the track
-    :param file_path: Path of the file saved for the track, empty when the track was never downloaded
+    :param file_path: Path of the file saved for the track, or of the folder of its album; empty when the track
+        was never downloaded
     """
 
     state: str
@@ -620,7 +695,8 @@ def read_index(index_path: Path) -> dict[tuple[str, str], IndexEntry]:
     The index can hold several rows for one track, for instance a row left unfinished by an interrupted run next
     to the row of a later success. A downloaded row wins over a failed one, which wins over an unfinished one.
     A downloaded row whose file is no longer there is left out, and the entry of a file converted to MP3 holds
-    the path of the MP3.
+    the path of the MP3. An entry downloaded as an album holds the folder of the album, and counts while that
+    folder still holds something.
 
     :param index_path: Index file written by sockseek
     :returns: Index entries keyed by loosely compared ``(artist, title)``; empty when there is no index yet
@@ -630,7 +706,7 @@ def read_index(index_path: Path) -> dict[tuple[str, str], IndexEntry]:
     entries: dict[tuple[str, str], IndexEntry] = {}
     with index_path.open(encoding="utf-8-sig", newline="") as file:
         for row in csv.DictReader(file):
-            entry = _read_index_row(row)
+            entry = _read_index_row(row, index_path.parent)
             if entry is None:
                 continue
             key = track_key(row["artist"], row["title"])
@@ -658,7 +734,7 @@ def repair_index(index_path: Path) -> int:
     kept_rows: dict[tuple[str, ...], dict[str, str]] = {}
     kept_entries: dict[tuple[str, ...], IndexEntry] = {}
     for row in rows:
-        entry = _read_index_row(row)
+        entry = _read_index_row(row, index_path.parent)
         if entry is None:
             continue
         key = tuple(row[column] for column in INDEX_IDENTITY_COLUMNS)
@@ -748,36 +824,57 @@ def _write_index_rows(index_path: Path, columns: Sequence[str], rows: Sequence[M
         writer.writerows(rows)
 
 
-def _locate_saved_file(recorded_path: str) -> str:
+def list_audio_files(folder: Path) -> list[str]:
+    """
+    List the audio files of an album folder, in the folders it may hold as well.
+
+    :param folder: Folder an album was saved in
+    :returns: Paths of the audio files, in alphabetical order; empty when the folder is missing
+    """
+    if not folder.is_dir():
+        return []
+    return sorted(str(path) for path in folder.rglob("*") if path.is_file() and path.suffix.lower() in AUDIO_EXTENSIONS)
+
+
+def _locate_saved_file(recorded_path: str, index_directory: Path) -> str:
     """
     Find the file the sockseek index records for a downloaded track, as it is on the disk now.
 
     The index keeps the name a file was downloaded under, so a file converted since is found as the MP3 next to
-    that name.
+    that name. Sockseek writes a path inside the folder of the index relative to that folder. The folder of an
+    album counts while it holds something.
 
     :param recorded_path: Path in the ``filepath`` column of the index
-    :returns: Path of the file, empty when it was moved or deleted
+    :param index_directory: Folder holding the index
+    :returns: Path of the file or folder, empty when it was moved or deleted
     """
     if not recorded_path:
         return ""
-    if Path(recorded_path).is_file():
+    path = Path(recorded_path)
+    if recorded_path.startswith(INDEX_RELATIVE_PREFIX):
+        path = index_directory / recorded_path[len(INDEX_RELATIVE_PREFIX) :]
+        recorded_path = str(path)
+    if path.is_file():
         return recorded_path
-    converted_path = Path(recorded_path).with_suffix(MP3_EXTENSION)
+    if path.is_dir():
+        return recorded_path if any(path.iterdir()) else ""
+    converted_path = path.with_suffix(MP3_EXTENSION)
     return str(converted_path) if converted_path.is_file() else ""
 
 
-def _read_index_row(row: Mapping[str, str]) -> IndexEntry | None:
+def _read_index_row(row: Mapping[str, str], index_directory: Path) -> IndexEntry | None:
     """
     Read one row of the sockseek index, checking a recorded download against the disk.
 
     :param row: Row of the sockseek index
+    :param index_directory: Folder holding the index
     :returns: The entry of the row, holding the path of the file as it is now; ``None`` for a download whose file
         is no longer there
     """
     entry = IndexEntry(state=row["state"], file_path=row["filepath"])
     if not entry.is_downloaded:
         return entry
-    saved_file = _locate_saved_file(entry.file_path)
+    saved_file = _locate_saved_file(entry.file_path, index_directory)
     return IndexEntry(state=entry.state, file_path=saved_file) if saved_file else None
 
 

@@ -19,6 +19,7 @@ class Track:
     :param duration_seconds: Track length in seconds, ``None`` when unknown
     :param artist_is_uncertain: ``True`` when the artist may really be an uploader or channel name
     :param url: Link to the track on the platform it was read from, empty when unknown
+    :param may_be_album: ``True`` when the place it was read from presents it as a whole album, not one song
     """
 
     artists: tuple[str, ...]
@@ -27,6 +28,7 @@ class Track:
     duration_seconds: int | None = None
     artist_is_uncertain: bool = False
     url: str = ""
+    may_be_album: bool = False
 
     @property
     def primary_artist(self) -> str:

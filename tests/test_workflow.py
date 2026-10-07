@@ -389,6 +389,136 @@ def test_downloading_a_track_again_replaces_its_file_or_keeps_it(tmp_path, monke
 
 
 @pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file() or FFMPEG is None, reason="needs sockseek and ffmpeg")
+def test_long_entry_that_is_not_a_song_is_downloaded_as_an_album(tmp_path, monkeypatch):
+    """
+    An entry as long as an album, for which no single file is found, is searched as an album: every song of the
+    shared folder is saved in a folder of its own, the songs in another format are converted, and the entry is
+    flagged for a check. A short track that is not found is not searched as an album, nor is anything when the
+    setting is off. The next download skips the album.
+    """
+    monkeypatch.setattr(workflow, "lookup_visible_location", lambda: HOME_LOCATION)
+    shared_files = tmp_path / "shared"
+    album_folder = shared_files / "Boards of Canada - Geogaddi (2002)"
+    album_folder.mkdir(parents=True)
+    (album_folder / "01 - Ready Lets Go.mp3").write_bytes(b"not really audio")
+    subprocess.run(
+        [
+            FFMPEG,
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=1",
+            str(album_folder / "02 - Music Is Math.flac"),
+        ],
+        check=True,
+    )
+    settings = dataclasses.replace(
+        make_settings(tmp_path, VPN_MODE_NONE),
+        extra_arguments=("--mock-files-dir", str(shared_files), "--mock-files-no-read-tags"),
+        convert_to_mp3=True,
+    )
+    long_video = Track(artists=("Boards of Canada",), title="Geogaddi", duration_seconds=3960)
+    short_missing = Track(artists=("Nobody Real",), title="Missing Song", duration_seconds=200)
+    tracks = [long_video, short_missing]
+    first_batch, second_batch, third_batch = (batch_directory(tmp_path, name) for name in ("first", "second", "third"))
+
+    without_albums = dataclasses.replace(settings, album_search=False)
+    report = run_download(without_albums, tracks, "list", first_batch, lambda message, level: None, lambda q: True)
+    assert (report.failed, report.albums) == (tracks, {})
+    assert not first_batch.exists()
+
+    tracker = ProgressTracker(tracks)
+    notifications: list[str] = []
+    searched: list[str] = []
+
+    def follow_album(track: Track, search) -> None:
+        """
+        Record the album searched for and let the tracker follow it.
+
+        :param track: Entry searched as an album
+        :param search: What is searched for
+        """
+        searched.append(f"{track.title}: {search.query}")
+        tracker.follow_album(track, search.query)
+
+    report = run_download(
+        settings,
+        tracks,
+        "list",
+        second_batch,
+        lambda message, level: notifications.append(message),
+        lambda question: True,
+        on_output_line=tracker.handle_line,
+        on_search_variants=tracker.follow_variants,
+        on_album_search=follow_album,
+        on_album_result=lambda track, album: tracker.finish_album(
+            track, album.folder if album else "", len(album.files) if album else 0
+        ),
+    )
+    saved_folder = second_batch / "Boards of Canada - Geogaddi (2002)"
+    assert searched == ["Geogaddi: Boards of Canada - Geogaddi"]
+    assert (report.downloaded, report.failed) == ([long_video], [short_missing])
+    assert Path(report.saved_files[long_video]) == saved_folder
+    assert [Path(file_path).name for file_path in report.albums[long_video].files] == [
+        "01 - Ready Lets Go.mp3",
+        "02 - Music Is Math.mp3",
+    ]
+    assert sorted(path.name for path in saved_folder.iterdir()) == ["01 - Ready Lets Go.mp3", "02 - Music Is Math.mp3"]
+    album_entry, missing_entry = tracker.snapshot()
+    assert (album_entry.status, album_entry.detail) == (STATUS_DOWNLOADED, "album of 2 files")
+    assert missing_entry.status == STATUS_FAILED
+    assert any(
+        'Geogaddi: not found as a song, searching for the album "Boards of Canada - Geogaddi"' in message
+        for message in notifications
+    )
+    assert any(
+        message.startswith('Downloaded as an album, by searching "Boards of Canada - Geogaddi"')
+        and "2 files in Boards of Canada - Geogaddi (2002). Check that it is the right album." in message
+        for message in notifications
+    )
+    assert any("Converted 02 - Music Is Math.flac" in message for message in notifications)
+
+    report = run_download(settings, tracks, "list", third_batch, lambda message, level: None, lambda q: True)
+    assert (report.already_downloaded, report.failed) == ([long_video], [short_missing])
+    assert Path(report.saved_files[long_video]) == saved_folder
+    assert not third_batch.exists()
+
+
+@pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file(), reason="sockseek is not installed in vendor/sockseek")
+def test_any_track_can_be_asked_as_an_album(tmp_path, monkeypatch):
+    """
+    A request for albums searches its tracks as albums straight away, whatever their length, under the name of
+    their album when it is known. A track no album is found for stays failed, and says why.
+    """
+    monkeypatch.setattr(workflow, "lookup_visible_location", lambda: HOME_LOCATION)
+    shared_files = tmp_path / "shared"
+    album_folder = shared_files / "Boards of Canada - Geogaddi (2002)"
+    album_folder.mkdir(parents=True)
+    for name in ("01 - Ready Lets Go", "02 - Music Is Math"):
+        (album_folder / f"{name}.mp3").write_bytes(b"not really audio")
+    settings = dataclasses.replace(
+        make_settings(tmp_path, VPN_MODE_NONE),
+        extra_arguments=("--mock-files-dir", str(shared_files), "--mock-files-no-read-tags"),
+    )
+    song = Track(artists=("Boards of Canada",), title="Music Is Math", album="Geogaddi", duration_seconds=321)
+    report = run_download(
+        settings,
+        [song, TRACK],
+        "list",
+        batch_directory(tmp_path),
+        lambda message, level: None,
+        lambda question: True,
+        request=TrackRequest((song, TRACK), as_albums=True),
+    )
+    assert (report.downloaded, report.failed) == ([song], [TRACK])
+    assert Path(report.albums[song].folder) == batch_directory(tmp_path) / "Boards of Canada - Geogaddi (2002)"
+    assert len(report.albums[song].files) == 2
+    assert report.notes[TRACK] == "not found as a song, and no album of that name could be downloaded"
+
+
+@pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file() or FFMPEG is None, reason="needs sockseek and ffmpeg")
 def test_run_download_reports_progress_and_converts_other_formats(tmp_path, monkeypatch):
     """
     A file found in another format is followed live, saved in the folder of the batch, converted to MP3 and

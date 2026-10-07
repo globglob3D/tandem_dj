@@ -45,7 +45,7 @@ from tandem_dj.text_cleaning import track_key
 from tandem_dj.ui import theme
 from tandem_dj.ui.settings_dialog import SettingsDialog
 from tandem_dj.ui.table_sort import POSITION_COLUMN, SortOrder, sort_value, sorted_rows
-from tandem_dj.ui.theme import STATUS_FOUND_RELAXED, STATUS_NOT_FINISHED
+from tandem_dj.ui.theme import STATUS_ALBUM, STATUS_FOUND_RELAXED, STATUS_NOT_FINISHED
 from tandem_dj.vpn import VPN_MODE_NONE, VpnError, VpnGuard
 from tandem_dj.workflow import (
     LEVEL_ERROR,
@@ -64,10 +64,11 @@ PROGRESS_BAR_CELLS = 10
 REFRESH_INTERVAL_MILLISECONDS = 300
 VPN_MESSAGE_PREFIX = "VPN: "
 UNFINISHED_STATUSES = (STATUS_WAITING, STATUS_SEARCHING, STATUS_DOWNLOADING)
-FILE_STATUSES = (STATUS_DOWNLOADED, STATUS_FOUND_RELAXED, STATUS_ALREADY_DOWNLOADED)
+FILE_STATUSES = (STATUS_DOWNLOADED, STATUS_FOUND_RELAXED, STATUS_ALBUM, STATUS_ALREADY_DOWNLOADED)
 MENU_DOWNLOAD = "Download"
 MENU_DOWNLOAD_AGAIN = "Download again"
 MENU_OTHER_SOURCE = "Download from another source"
+MENU_ALBUM = "Download as an album (every song of it)"
 MENU_LEAVE_SOURCE = "Leave this source now (the other transfers in progress start over)"
 MENU_SHOW_FILE = "Show the file in its folder"
 MENU_COPY = "Copy artist and title"
@@ -206,14 +207,23 @@ class MainWindow(tkinter.Tk):
         """
         self.table_menu = tkinter.Menu(self, tearoff=False)
         theme.style_menu(self.table_menu)
-        self.table_menu.add_command(label=MENU_DOWNLOAD_AGAIN, command=self._on_download_again)
-        self.table_menu.add_command(label=MENU_OTHER_SOURCE, command=self._on_download_from_another_source)
-        self.table_menu.add_command(label=MENU_LEAVE_SOURCE, command=self._on_leave_source)
-        self.table_menu.add_separator()
-        self.table_menu.add_command(label=MENU_SHOW_FILE, command=self._on_show_file)
-        self.table_menu.add_command(label=MENU_COPY, command=self._on_copy)
-        self.table_menu.add_separator()
-        self.table_menu.add_command(label=MENU_SELECT_MISSING, command=self._on_select_missing)
+        self.menu_positions: dict[str, int] = {}
+        for label, command in (
+            (MENU_DOWNLOAD_AGAIN, self._on_download_again),
+            (MENU_OTHER_SOURCE, self._on_download_from_another_source),
+            (MENU_ALBUM, self._on_download_as_album),
+            (MENU_LEAVE_SOURCE, self._on_leave_source),
+            (None, None),
+            (MENU_SHOW_FILE, self._on_show_file),
+            (MENU_COPY, self._on_copy),
+            (None, None),
+            (MENU_SELECT_MISSING, self._on_select_missing),
+        ):
+            if label is None:
+                self.table_menu.add_separator()
+                continue
+            self.table_menu.add_command(label=label, command=command)
+            self.menu_positions[label] = self.table_menu.index("end")
         right_click_events = ("<Button-2>", "<Control-Button-1>") if sys.platform == "darwin" else ("<Button-3>",)
         for event_name in right_click_events:
             self.table.bind(event_name, self._on_table_menu)
@@ -369,16 +379,19 @@ class MainWindow(tkinter.Tk):
         free_tracks = self._free_tracks(tracks)
         was_tried = any(self._sources_of(track) or self._has_file(track) for track in free_tracks)
         states = {
-            0: bool(free_tracks),
-            1: any(self._sources_of(track) for track in free_tracks),
-            2: bool(self._sources_in_use(tracks)),
-            4: any(self._has_file(track) for track in tracks),
-            5: bool(tracks),
-            7: bool(self.row_tracks),
+            MENU_DOWNLOAD_AGAIN: bool(free_tracks),
+            MENU_OTHER_SOURCE: any(self._sources_of(track) for track in free_tracks),
+            MENU_ALBUM: bool(free_tracks),
+            MENU_LEAVE_SOURCE: bool(self._sources_in_use(tracks)),
+            MENU_SHOW_FILE: any(self._has_file(track) for track in tracks),
+            MENU_COPY: bool(tracks),
+            MENU_SELECT_MISSING: bool(self.row_tracks),
         }
-        for index, is_enabled in states.items():
-            self.table_menu.entryconfigure(index, state="normal" if is_enabled else "disabled")
-        self.table_menu.entryconfigure(0, label=MENU_DOWNLOAD_AGAIN if was_tried else MENU_DOWNLOAD)
+        for label, is_enabled in states.items():
+            self.table_menu.entryconfigure(self.menu_positions[label], state="normal" if is_enabled else "disabled")
+        self.table_menu.entryconfigure(
+            self.menu_positions[MENU_DOWNLOAD_AGAIN], label=MENU_DOWNLOAD_AGAIN if was_tried else MENU_DOWNLOAD
+        )
 
     def _on_download_again(self) -> None:
         """
@@ -405,6 +418,14 @@ class MainWindow(tkinter.Tk):
             return
         avoided_sources = tuple(dict.fromkeys(source for track in tracks for source in self._sources_of(track)))
         self._queue_request(TrackRequest(tuple(tracks), avoided_sources=avoided_sources, replace_files=True))
+
+    def _on_download_as_album(self) -> None:
+        """
+        Search each selected track as a whole album, and download every song of the albums found.
+        """
+        tracks = self._free_tracks(self._selected_tracks())
+        if tracks:
+            self._queue_request(TrackRequest(tuple(tracks), as_albums=True))
 
     def _on_leave_source(self) -> None:
         """
@@ -799,6 +820,10 @@ class MainWindow(tkinter.Tk):
             request=request,
             control=self.control,
             on_request=follow_request,
+            on_album_search=lambda track, search: tracker.follow_album(track, search.query),
+            on_album_result=lambda track, album: tracker.finish_album(
+                track, album.folder if album else "", len(album.files) if album else 0
+            ),
         )
         self.messages.put(("finished", report, batch_directory))
 
@@ -987,8 +1012,11 @@ class MainWindow(tkinter.Tk):
         Redraw the rows and the summary bar from the live progress.
         """
         for entry in self.tracker.snapshot():
-            found_relaxed = entry.status == STATUS_DOWNLOADED and entry.relaxed_query
-            status = STATUS_FOUND_RELAXED if found_relaxed else entry.status
+            status = entry.status
+            if entry.status == STATUS_DOWNLOADED and entry.album_query:
+                status = STATUS_ALBUM
+            elif entry.status == STATUS_DOWNLOADED and entry.relaxed_query:
+                status = STATUS_FOUND_RELAXED
             self._show_row(entry.track, status, _describe_progress(entry), entry)
         self._sort_rows()
         summary = self.tracker.summary()
@@ -1042,22 +1070,25 @@ class MainWindow(tkinter.Tk):
         live_entries = self._live_entries()
         for track in report.downloaded:
             file_name = Path(report.saved_files.get(track, "")).name
-            relaxed_match = report.relaxed_matches.get(track)
-            self._show_row(
-                track,
-                STATUS_FOUND_RELAXED if relaxed_match else STATUS_DOWNLOADED,
-                _draw_bar(100),
-                live_entries.get(track),
-                f'saved as {file_name}, found by searching "{relaxed_match.query}": check it'
-                if relaxed_match
-                else f"saved as {file_name}",
-            )
+            relaxed_match, album = report.relaxed_matches.get(track), report.albums.get(track)
+            status, detail = STATUS_DOWNLOADED, f"saved as {file_name}"
+            if album is not None:
+                status = STATUS_ALBUM
+                detail = (
+                    f"album of {len(album.files)} files saved in the folder {file_name}, "
+                    f'found by searching "{album.query}": check it'
+                )
+            elif relaxed_match is not None:
+                status = STATUS_FOUND_RELAXED
+                detail = f'saved as {file_name}, found by searching "{relaxed_match.query}": check it'
+            self._show_row(track, status, _draw_bar(100), live_entries.get(track), detail)
         for track in report.already_downloaded:
             detail = report.notes.get(track) or _describe_existing_file(report.saved_files.get(track, ""))
             self._show_row(track, STATUS_ALREADY_DOWNLOADED, "", None, detail)
         for track in report.failed:
             entry = live_entries.get(track)
-            self._show_row(track, STATUS_FAILED, "", None, entry.detail if entry else "not found or failed")
+            detail = (entry.detail if entry else "") or report.notes.get(track) or "not found or failed"
+            self._show_row(track, STATUS_FAILED, "", None, detail)
         for track in report.not_attempted:
             self._show_row(track, STATUS_NOT_FINISHED, "", None, "right-click to download it, or run Download again")
         self._keep_outcome(report, live_entries)
@@ -1070,6 +1101,8 @@ class MainWindow(tkinter.Tk):
             if totals.relaxed_matches
             else ""
         )
+        if totals.albums:
+            relaxed_note += f" ({len(totals.albums)} as whole albums: check them)"
         text = (
             f"Finished: {len(totals.downloaded)} downloaded{relaxed_note}, "
             f"{len(totals.already_downloaded)} already had, "
@@ -1147,6 +1180,8 @@ def _describe_request(request: TrackRequest) -> str:
     :param request: Tracks to download, and how
     :returns: Text such as ``download from another source than peer``
     """
+    if request.as_albums:
+        return "download as an album"
     if request.avoided_sources:
         return f"download from another source than {', '.join(request.avoided_sources)}"
     if request.preferred_sources:

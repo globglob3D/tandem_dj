@@ -8,6 +8,7 @@ import urllib.parse
 
 import yt_dlp
 
+from tandem_dj.album_search import announces_album
 from tandem_dj.logs import write_log
 from tandem_dj.models import Track, TrackCollection
 from tandem_dj.sources.base import SourceError, TrackSource
@@ -217,4 +218,5 @@ def _track_from_entry(entry: dict) -> Track | None:
         duration_seconds=round(duration) if duration else None,
         artist_is_uncertain=artist_is_uncertain,
         url=entry.get("webpage_url") or entry.get("url") or "",
+        may_be_album=announces_album(raw_title),
     )

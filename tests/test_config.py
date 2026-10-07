@@ -28,6 +28,7 @@ def test_settings_survive_a_save_and_load(tmp_path):
         mp3_bitrate=256,
         relaxed_search=False,
         silent_source_seconds=15,
+        album_search=False,
     )
     path = save_settings(settings, tmp_path / "nested" / "config.toml")
     assert load_settings(path) == settings
@@ -41,6 +42,7 @@ def test_a_source_is_given_thirty_seconds_unless_the_settings_say_otherwise(tmp_
     path = tmp_path / "config.toml"
     path.write_text(MINIMAL_SETTINGS, encoding="utf-8")
     assert load_settings(path).silent_source_seconds == 30
+    assert load_settings(path).album_search is True
     path.write_text(MINIMAL_SETTINGS + "silent_source_seconds = 1\n", encoding="utf-8")
     assert load_settings(path).silent_source_seconds == 5
 

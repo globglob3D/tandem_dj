@@ -52,6 +52,9 @@ class ProgressTracker:
         }
         self._entry_by_job: dict[str, TrackProgress] = {}
         self._entry_by_variant: dict[tuple[str, str], TrackProgress] = {}
+        self._album_entry: TrackProgress | None = None
+        self._album_file_sizes: dict[str, int] = {}
+        self._album_files_received: set[str] = set()
         self._started_at: datetime | None = None
         self._latest_at: datetime | None = None
 
@@ -91,6 +94,7 @@ class ProgressTracker:
                 self._entry_by_job = {job: other for job, other in self._entry_by_job.items() if other is not entry}
                 entry.is_followed = True
                 entry.status, entry.detail, entry.relaxed_query, entry.saved_path = STATUS_WAITING, detail, "", ""
+                entry.album_query = ""
                 entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
                 entry.progress_at = None
 
@@ -112,6 +116,48 @@ class ProgressTracker:
                 entry.status, entry.relaxed_query = STATUS_WAITING, variant.query
                 entry.detail = f'searching again as "{variant.query}"'
                 entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
+
+    def follow_album(self, track: Track, query: str) -> None:
+        """
+        Expect the next events to be about the files of an album searched for one entry of the list.
+
+        Sockseek reports the files of an album one by one, under their own titles, and nothing about the album as
+        a whole. Until :meth:`finish_album`, every event is therefore counted towards that entry.
+
+        :param track: Entry of the list the album stands for
+        :param query: What is searched for
+        """
+        with self._lock:
+            entry = self._entries.get(track_key(track.primary_artist, track.title))
+            if entry is None:
+                return
+            self._album_entry, self._album_file_sizes, self._album_files_received = entry, {}, set()
+            entry.is_followed = True
+            entry.status, entry.album_query, entry.relaxed_query = STATUS_SEARCHING, query, ""
+            entry.detail = f'not found as a song, searching for the album "{query}"'
+            entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
+
+    def finish_album(self, track: Track, folder: str = "", file_count: int = 0) -> None:
+        """
+        Stop counting events towards an album, and record how its search ended.
+
+        :param track: Entry of the list the album stands for
+        :param folder: Folder the album was saved in, empty when none was found or downloaded
+        :param file_count: Number of audio files of the album
+        """
+        with self._lock:
+            self._album_entry = None
+            entry = self._entries.get(track_key(track.primary_artist, track.title))
+            if entry is None:
+                return
+            entry.speed_bytes_per_second = 0.0
+            if folder:
+                entry.status, entry.saved_path = STATUS_DOWNLOADED, folder
+                entry.bytes_transferred = entry.total_bytes
+                entry.detail = f"album of {file_count} files"
+            else:
+                entry.status = STATUS_FAILED
+                entry.detail = f'not found as a song, and no album "{entry.album_query}" could be downloaded'
 
     def snapshot(self) -> list["TrackProgress"]:
         """
@@ -168,6 +214,9 @@ class ProgressTracker:
             self._started_at = self._started_at or event_time
             self._latest_at = event_time
         event_type = event["type"]
+        if self._album_entry is not None:
+            self._apply_album_event(event_type, data)
+            return
         if event_type == "track_list":
             for description in data.get("tracks") or []:
                 entry = self._find(description)
@@ -193,6 +242,34 @@ class ProgressTracker:
                 entry.bytes_transferred, entry.speed_bytes_per_second, entry.progress_at = 0, 0.0, None
         elif event_type == "download_progress":
             self._apply_download_progress(data, event_time)
+
+    def _apply_album_event(self, event_type: str, data: dict) -> None:
+        """
+        Count an event about one file of the album being downloaded towards the entry the album stands for.
+
+        :param event_type: Type of the event
+        :param data: Data of the event, naming the file as shared on Soulseek
+        """
+        entry, file_name = self._album_entry, str(data.get("filename") or "")
+        if event_type == "download_start" and file_name:
+            self._album_file_sizes[file_name] = int(data.get("size") or 0)
+            entry.status = STATUS_DOWNLOADING
+            source = str(data.get("username") or "")
+            if source and source not in entry.sources:
+                entry.sources += (source,)
+        elif event_type == "track_state" and data.get("terminalOutcome") == "Succeeded" and file_name:
+            self._album_file_sizes.setdefault(file_name, int(data.get("size") or 0))
+            self._album_files_received.add(file_name)
+        else:
+            return
+        entry.total_bytes = sum(self._album_file_sizes.values())
+        entry.bytes_transferred = sum(self._album_file_sizes[name] for name in self._album_files_received)
+        folder_name = PureWindowsPath(file_name).parent.name
+        source_name = entry.sources[-1] if entry.sources else "?"
+        entry.detail = (
+            f"album from {source_name}: {folder_name} "
+            f"({len(self._album_files_received)} of {len(self._album_file_sizes)} files)"
+        )
 
     @staticmethod
     def _wait_again(entry: "TrackProgress") -> None:
@@ -294,6 +371,7 @@ class TrackProgress:
     :param speed_bytes_per_second: Current transfer speed
     :param saved_path: Path the file was saved to, empty until the track is downloaded
     :param relaxed_query: Simpler spelling the track is or was last searched under, empty for the exact search
+    :param album_query: Album the entry is or was last searched as, empty when it was only searched as a song
     :param sources: Soulseek users a transfer of this track was started from, in the order they were tried
     :param is_followed: Whether the track is part of the run being followed
     :param progress_at: Time of the latest transfer progress event
@@ -307,6 +385,7 @@ class TrackProgress:
     speed_bytes_per_second: float = 0.0
     saved_path: str = ""
     relaxed_query: str = ""
+    album_query: str = ""
     sources: tuple[str, ...] = ()
     is_followed: bool = True
     progress_at: datetime | None = field(default=None, repr=False)

@@ -8,6 +8,7 @@ import re
 
 import httpx
 
+from tandem_dj.album_search import announces_album
 from tandem_dj.models import Track, TrackCollection
 from tandem_dj.sources.base import BROWSER_USER_AGENT, REQUEST_TIMEOUT_SECONDS, SourceError, TrackSource
 from tandem_dj.text_cleaning import normalize_text, parse_upload_title
@@ -136,6 +137,7 @@ def _track_from_description(description: dict) -> Track:
         title=title,
         album=normalize_text(publisher_metadata.get("release_title") or publisher_metadata.get("album_title") or ""),
         duration_seconds=round(duration_milliseconds / 1000) if duration_milliseconds else None,
+        may_be_album=announces_album(description["title"]),
         artist_is_uncertain=artist_is_uncertain,
         url=description.get("permalink_url") or "",
     )

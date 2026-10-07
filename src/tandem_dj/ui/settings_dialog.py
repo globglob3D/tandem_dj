@@ -47,6 +47,7 @@ class SettingsDialog(tkinter.Toplevel):
         self.preferred_minimum_bitrate = tkinter.StringVar(self, str(settings.preferred_minimum_bitrate))
         self.relaxed_search = tkinter.BooleanVar(self, settings.relaxed_search)
         self.silent_source_seconds = tkinter.StringVar(self, str(settings.silent_source_seconds))
+        self.album_search = tkinter.BooleanVar(self, settings.album_search)
         self.extra_arguments = tkinter.StringVar(self, " ".join(settings.extra_arguments))
         self.vpn_mode = tkinter.StringVar(self, settings.vpn_mode)
         self.piactl_executable = tkinter.StringVar(self, str(settings.piactl_executable))
@@ -68,6 +69,11 @@ class SettingsDialog(tkinter.Toplevel):
             form,
             "Search tracks that are not found again under simpler spellings (no accents, no punctuation, title alone)",
             self.relaxed_search,
+        )
+        self._add_checkbox(
+            form,
+            "Download the whole album when a long entry (15 minutes or more, or a full album) is not found as a song",
+            self.album_search,
         )
         self._add_entry(
             form, "Drop a silent source after (s)", self.silent_source_seconds, hint="then the next one is tried"
@@ -222,6 +228,7 @@ class SettingsDialog(tkinter.Toplevel):
             preferred_minimum_bitrate=preferred_minimum_bitrate,
             relaxed_search=self.relaxed_search.get(),
             silent_source_seconds=silent_source_seconds,
+            album_search=self.album_search.get(),
             extra_arguments=tuple(self.extra_arguments.get().split()),
             vpn_mode=self.vpn_mode.get(),
             piactl_executable=Path(self.piactl_executable.get().strip()),
