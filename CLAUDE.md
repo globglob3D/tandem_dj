@@ -54,6 +54,8 @@ scripts/
   make_icon.py       draws the icon (two cogwheels in pixel art) with the standard library only
   build.py           PyInstaller build, then the Windows setup program (Inno Setup) or the macOS disk image
   smoke_test.py      starts the built application on temporary settings and checks what its log says
+.github/workflows/
+  build.yml          tests, builds and smoke-tests on Windows, macOS arm64 and macOS x64; releases on v* tags
 installer/
   tandem_dj.iss      Inno Setup script of the Windows setup program
   THIRD_PARTY_NOTICES.txt  licences of what is shipped inside the application
@@ -159,6 +161,10 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
   folder alone. Inno Setup is found on the PATH or in its usual folders (`winget install JRSoftware.InnoSetup`).
 - On macOS the result is `Tandem DJ.app`, packed into a `.dmg` with a link to `/Applications`. It can only be built
   on a Mac, which the GitHub Actions workflow does.
+- `.github/workflows/build.yml` is the only way the Mac builds get made and tested: nobody working on this
+  project has a Mac at hand. It runs the test suite (with the real macOS sockseek in mock mode), the build and the
+  smoke test on each system, and uploads the setup program and disk images as artifacts. Mac problems reported by
+  friends should be reproduced there, by adding to the tests or to the smoke test.
 - Nothing is code signed. Windows shows "Windows protected your PC" and macOS refuses the first launch until the
   user allows it; `README.md` tells users what to click.
 - `scripts/smoke_test.py` is the check that a build works: it starts the program with `TANDEM_DJ_HOME` pointing at

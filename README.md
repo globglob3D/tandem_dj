@@ -179,6 +179,9 @@ uv run python scripts/smoke_test.py   # starts the result and checks that it fin
 - The setup program needs [Inno Setup](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`);
   without it only the `dist/Tandem DJ/` folder is built.
 - On a Mac the same command builds `dist/Tandem DJ.app` and a `.dmg`.
+- GitHub builds all three (Windows, Mac Apple Silicon, Mac Intel) for every pull request and every push to
+  `main`: open the run under the repository's **Actions** tab and download the artifacts at the bottom of its
+  page. Pushing a tag such as `v0.2.0` also publishes them as a release.
 - The licences of everything shipped inside are listed in
   [installer/THIRD_PARTY_NOTICES.txt](installer/THIRD_PARTY_NOTICES.txt).
 
