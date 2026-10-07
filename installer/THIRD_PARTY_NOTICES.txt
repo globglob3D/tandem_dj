@@ -1,0 +1,31 @@
+Tandem DJ ships with programs and libraries written by others. Each keeps its own licence.
+
+sockseek
+    The Soulseek batch downloader that Tandem DJ runs for every download, as a separate program.
+    Licence: GNU Affero General Public License v3.0 (see vendor/sockseek/LICENSE next to this file).
+    Source code: https://github.com/fiso64/sockseek
+
+FFmpeg
+    Converts downloads to MP3, as a separate program. The copy shipped here comes from the imageio-ffmpeg
+    package and is a GPL build of FFmpeg.
+    Licence: GNU General Public License v3.0 or later, https://www.gnu.org/licenses/gpl-3.0.html
+    Source code: https://ffmpeg.org/download.html and https://github.com/imageio/imageio-ffmpeg
+
+yt-dlp
+    Reads YouTube playlists.
+    Licence: The Unlicense. Source code: https://github.com/yt-dlp/yt-dlp
+
+httpx, httpcore, h11, anyio, idna, certifi and sniffio
+    Web requests.
+    Licences: BSD-3-Clause (httpx, httpcore, idna), MIT (h11, anyio, sniffio), MPL-2.0 (certifi).
+
+imageio-ffmpeg
+    Locates the FFmpeg program. Licence: BSD-2-Clause.
+
+Python and Tcl/Tk
+    The language and window toolkit Tandem DJ is written with.
+    Licences: Python Software Foundation License, Tcl/Tk licence (BSD style).
+
+PyInstaller
+    Packs the application. Licence: GPL-2.0 or later with an exception that lets packed applications carry any
+    licence.

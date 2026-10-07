@@ -1,0 +1,17 @@
+# The sockseek program, too large for git (see vendor/sockseek/README.md)
+vendor/sockseek/sockseek
+vendor/sockseek/sockseek.exe
+vendor/sockseek/sockseek.conf
+
+# Build output of scripts/build.py
+dist/
+build/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+*.log
