@@ -3,6 +3,33 @@
 A window for managing DJ music. It reads track lists from Spotify, YouTube and SoundCloud (or from what you type)
 and batch-downloads the tracks from Soulseek as MP3 files, straight onto the USB key.
 
+## Installing
+
+Nothing else has to be installed: Python, sockseek and ffmpeg are inside the application. You need a
+[Soulseek](https://www.slsknet.org/) account (any new user name and password work), and ideally a
+[VPN](#vpn).
+
+**Windows**
+
+1. Download `Tandem DJ Setup <version>.exe` and open it.
+2. Windows shows "Windows protected your PC", because the program is not signed by a company: click **More info**,
+   then **Run anyway**.
+3. Follow the setup. Tandem DJ is then in the Start Menu.
+
+**Mac**
+
+1. Download the `.dmg` for your Mac: `arm64` for Apple Silicon (M1 and later), `x64` for Intel.
+2. Open it and drag **Tandem DJ** onto **Applications**.
+3. Open Tandem DJ from Applications. macOS refuses the first time, for the same reason as Windows: open
+   **System Settings > Privacy & Security**, scroll down and click **Open Anyway**. On older versions of macOS,
+   right-click the application and choose **Open** instead.
+4. If macOS says the application "is damaged", open the Terminal and run
+   `xattr -dr com.apple.quarantine "/Applications/Tandem DJ.app"`, then open it again.
+
+The first launch opens the settings: fill in your Soulseek account, pick the download folder and a VPN choice.
+
+To update, install the new version over the old one. Settings and download history are kept.
+
 ## Using it
 
 1. **Paste** one or more Spotify, YouTube or SoundCloud links, or tracks written as `Artist - Title`, one per line.
@@ -141,5 +168,18 @@ uv run pytest          # tests, including an offline run of the real sockseek ag
 uv run ruff format .
 uv run ruff check .
 ```
+
+## Building the application
+
+```powershell
+uv run python scripts/build.py        # dist/Tandem DJ/ and, on Windows, dist/Tandem DJ Setup <version>.exe
+uv run python scripts/smoke_test.py   # starts the result and checks that it finds sockseek and ffmpeg
+```
+
+- The setup program needs [Inno Setup](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`);
+  without it only the `dist/Tandem DJ/` folder is built.
+- On a Mac the same command builds `dist/Tandem DJ.app` and a `.dmg`.
+- The licences of everything shipped inside are listed in
+  [installer/THIRD_PARTY_NOTICES.txt](installer/THIRD_PARTY_NOTICES.txt).
 
 Project layout and conventions are described in [CLAUDE.md](CLAUDE.md).
