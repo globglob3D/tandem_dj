@@ -405,6 +405,15 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
 - **SoundCloud** describes only the first few tracks of a set in full; the others are fetched by id in batches of 50.
 - **YouTube** flat listings carry only title, channel and duration, so artists are parsed from titles. Channels
   ending in ` - Topic` are auto-generated and name the artist reliably.
+- **What `strip_noise()` drops from an upload title** (YouTube, SoundCloud and typed lines share it). A Soulseek
+  search needs every word in the file path, so one label name left in a title makes the track unfindable; the
+  user saw that with `Kowloon City [LFEK007]` and `... [Bounce Records]`. Square brackets and braces are dropped
+  unless `_MUSICAL_DETAIL` matches (`[Extended Mix]`, `[Someone Remix]`, `[feat. X]`, `[Part 2]`): uploads use
+  them for labels, catalogue numbers and genres. Parentheses are only dropped when `_NOISE` matches
+  (`(Official Video)`), since they often belong to the name of a song. A bracketed group alone on its side of
+  the separator is a name and is kept (`[KRTM] - Track`, `Artist - [untitled]`). `_MUSICAL_DETAIL` matches whole
+  words, so `[Dubstep]`, `[Mixmag]` and `[Limited Edition]` go; a label whose name holds such a word
+  (`[Live From Earth]`) stays.
 - **A YouTube video link that names a playlist** (`watch?v=<video>&list=<playlist>`) is read through the page of
   the playlist (`playlist_link()` builds `playlist?list=<playlist>`). Asked for the video link, yt-dlp reads the
   page of the video and takes the playlist from its side panel; when YouTube serves that page without the panel,
