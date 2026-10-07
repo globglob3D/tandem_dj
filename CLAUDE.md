@@ -9,6 +9,7 @@ extend. It runs on Windows and macOS.
 
 ```powershell
 uv sync                    # install / update the environment (.venv, Python 3.13)
+uv run python scripts/build.py --only-sockseek   # once: download sockseek into vendor/sockseek
 uv run tandem              # open the window (same as: uv run python -m tandem_dj)
 uv run pytest              # tests; includes an offline run of the real sockseek binary
 uv run ruff format .       # formatting (line length 120, double quotes)
@@ -173,6 +174,7 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 - The sockseek version to ship is `SOCKSEEK_VERSION` in `scripts/build.py`; the build downloads it when
   `vendor/sockseek` does not hold the program of the current system.
 - The version of the application is `__version__` in `src/tandem_dj/__init__.py` and `version` in `pyproject.toml`.
+  Releasing is: bump both, `uv lock`, commit, push a `v<version>` tag; the workflow publishes the three downloads.
 
 ## Standing requirements from the user
 
@@ -187,6 +189,8 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 - **It must stay easy to share**: nothing may depend on the repository folder, the PATH or a Windows-only path.
   Go through `paths.py` for every location.
 - **Commit in small, focused steps**, each with its tests and documentation.
+
+## Extending
 
 ### Adding a website
 
@@ -253,6 +257,25 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
   ending in ` - Topic` are auto-generated and name the artist reliably.
 - The Soulseek password appears on the sockseek command line; use `SockseekDownloader.describe_command()` when a
   command has to be displayed or logged.
+
+## State of the project
+
+Version 0.2.0, left in a finished state on 2026-10-07. What is known to work and what is not:
+
+- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (177
+  tests, none skipped, including the offline runs of the real sockseek and the hidden-window tests), the build, and
+  the smoke test showing that the packaged application starts and that the sockseek and ffmpeg packed inside answer.
+- **Checked by hand on Windows**: the setup program installs, starts and uninstalls; a whole download driven through
+  the real window against sockseek's mock mode (exact search, relaxed search, M4A conversion, password masked in
+  the log).
+- **Never checked**: what the window looks like on a Mac (fonts, the `clam` theme, dialogs), the first-launch steps
+  on macOS described in `README.md`, and `piactl` at `/usr/local/bin/piactl`. The relaxed search has only run
+  against the mock mode, never the real Soulseek network. The `manual` VPN mode has only run with simulated
+  address lookups.
+
+Ideas that were mentioned and not started: preparing files for rekordbox; using the BPM and key Spotify returns;
+code signing to remove the first-launch warnings; telling the user when a newer version exists; exporting a track
+list to a file.
 
 ## Conventions
 

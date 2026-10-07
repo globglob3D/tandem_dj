@@ -3,6 +3,13 @@
 A window for managing DJ music. It reads track lists from Spotify, YouTube and SoundCloud (or from what you type)
 and batch-downloads the tracks from Soulseek as MP3 files, straight onto the USB key.
 
+- For everyone: [Installing](#installing), [Using it](#using-it), [When a track is not found](#when-a-track-is-not-found),
+  [When something goes wrong](#when-something-goes-wrong), [Where things are kept](#where-things-are-kept),
+  [VPN](#vpn)
+- For developers: [How the websites are read](#how-the-websites-are-read),
+  [Running from source](#running-from-source), [Building the application](#building-the-application),
+  [Releasing a new version](#releasing-a-new-version)
+
 ## Installing
 
 Nothing else has to be installed: Python, sockseek and ffmpeg are inside the application. You need a
@@ -11,14 +18,15 @@ Nothing else has to be installed: Python, sockseek and ffmpeg are inside the app
 
 **Windows**
 
-1. Download `Tandem DJ Setup <version>.exe` and open it.
+1. Get `Tandem DJ Setup <version>.exe` from whoever shared Tandem DJ with you, and open it.
 2. Windows shows "Windows protected your PC", because the program is not signed by a company: click **More info**,
    then **Run anyway**.
 3. Follow the setup. Tandem DJ is then in the Start Menu.
 
 **Mac**
 
-1. Download the `.dmg` for your Mac: `arm64` for Apple Silicon (M1 and later), `x64` for Intel.
+1. Get the `.dmg` for your Mac: `arm64` for Apple Silicon (M1 and later), `x64` for Intel. The Apple menu,
+   **About This Mac**, says which one you have ("Chip: Apple M..." or "Processor: Intel...").
 2. Open it and drag **Tandem DJ** onto **Applications**.
 3. Open Tandem DJ from Applications. macOS refuses the first time, for the same reason as Windows: open
    **System Settings > Privacy & Security**, scroll down and click **Open Anyway**. On older versions of macOS,
@@ -104,6 +112,17 @@ Click **Open logs folder** under the track table and send the most recent `tande
 
 If the window does not open at all, a message box says why and where the log file is.
 
+Common situations:
+
+| What you see | What to do |
+| --- | --- |
+| "Private Internet Access was not found" | You have no PIA, or it is installed elsewhere: pick another [VPN](#vpn) choice in **Settings...**, or fix the path of `piactl` there. |
+| "The VPN did not connect" | Open Private Internet Access and check that you are logged in. |
+| "The output folder ... is not available" | The USB key is not plugged in, or the download folder no longer exists: pick it again in **Settings...**. |
+| Every track fails at once | The Soulseek user name or password is wrong, or the same account is logged in elsewhere (a second login kicks the first). |
+| A link gives an error but worked before | The website changed. Install a newer Tandem DJ; meanwhile, paste the tracks as `Artist - Title` lines. |
+| Tracks marked "Not finished" | The download was stopped or the VPN dropped: click **Download** again, finished tracks are skipped. |
+
 ## Where things are kept
 
 Everything the application writes lives in one folder per user:
@@ -112,7 +131,7 @@ Everything the application writes lives in one folder per user:
 | --- | --- |
 | Windows | `%APPDATA%\Tandem DJ` |
 | macOS | `~/Library/Application Support/Tandem DJ` |
-| Linux | `~/.local/share/tandem-dj` |
+| Linux (running from source only) | `~/.local/share/tandem-dj` |
 
 - `config.toml`: the settings, written by the **Settings...** button. It holds the Soulseek password.
 - `data/sockseek_index.csv`: the download history. To download a track again, delete its line (or delete the file
@@ -147,15 +166,17 @@ Soulseek is a peer-to-peer network: the people you download from see the IP addr
 | YouTube | [yt-dlp](https://github.com/yt-dlp/yt-dlp) playlist listing. Video titles are cleaned (`(Official Video)` and the like) and split into artist and title. | Titles are free text, so check the result with **Read tracks** before downloading. |
 | SoundCloud | The website's public API. Artists come from the publisher metadata when present, otherwise from the title. | Same caveat as YouTube. Private sets are not readable. |
 
-If a website stops working, upgrade the readers first: `uv lock --upgrade-package yt-dlp; uv sync`. As a last resort
-any list can be pasted by hand.
+If a website stops working, upgrade the readers first (`uv lock --upgrade-package yt-dlp; uv sync`), then build and
+share a new version: an installed application keeps the readers it was built with. As a last resort any list can be
+pasted by hand.
 
 ## Running from source
 
 Requirements:
 
 - [uv](https://docs.astral.sh/uv/)
-- the sockseek program in `vendor/sockseek/` (see [vendor/sockseek/README.md](vendor/sockseek/README.md))
+- the sockseek program in `vendor/sockseek/`, which `uv run python scripts/build.py --only-sockseek` downloads
+  (see [vendor/sockseek/README.md](vendor/sockseek/README.md))
 - [Private Internet Access](https://www.privateinternetaccess.com/), logged in, unless another [VPN](#vpn) choice
   is made in the settings
 
@@ -163,6 +184,7 @@ ffmpeg comes with the Python environment (the `imageio-ffmpeg` package), so noth
 
 ```powershell
 uv sync                # creates .venv and installs everything
+uv run python scripts/build.py --only-sockseek   # once: downloads sockseek into vendor/sockseek
 uv run tandem          # opens the window; the first launch asks for the settings
 uv run pytest          # tests, including an offline run of the real sockseek against local files
 uv run ruff format .
@@ -185,4 +207,15 @@ uv run python scripts/smoke_test.py   # starts the result and checks that it fin
 - The licences of everything shipped inside are listed in
   [installer/THIRD_PARTY_NOTICES.txt](installer/THIRD_PARTY_NOTICES.txt).
 
-Project layout and conventions are described in [CLAUDE.md](CLAUDE.md).
+## Releasing a new version
+
+1. Set the new version in `src/tandem_dj/__init__.py` (`__version__`) and in `pyproject.toml` (`version`), run
+   `uv lock`, and commit.
+2. Tag the commit and push the tag: `git tag v0.3.0; git push origin v0.3.0`.
+3. GitHub builds the three downloads and attaches them to a release named after the tag. Send those files to
+   whoever uses Tandem DJ; installing over the old version keeps settings and history.
+
+To ship a newer sockseek, change `SOCKSEEK_VERSION` in `scripts/build.py`, delete the program in `vendor/sockseek/`
+and run the tests.
+
+Project layout, design decisions and conventions are described in [CLAUDE.md](CLAUDE.md).
