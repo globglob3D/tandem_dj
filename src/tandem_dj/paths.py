@@ -154,3 +154,18 @@ def open_folder(folder: Path) -> None:
         os.startfile(folder)
     else:
         subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(folder)])
+
+
+def show_in_folder(path: Path) -> None:
+    """
+    Show a file or a folder in the file manager of the operating system, selected inside the folder holding it.
+
+    :param path: File or folder to show
+    :raises OSError: If the file manager cannot be started
+    """
+    if sys.platform == "win32":
+        subprocess.Popen(["explorer", f"/select,{path}"])
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", "-R", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path.parent)])

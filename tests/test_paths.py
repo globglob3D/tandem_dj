@@ -60,3 +60,21 @@ def test_find_ffmpeg_finds_the_shipped_program():
     The ffmpeg shipped with the application is the one used for conversions.
     """
     assert Path(paths.find_ffmpeg()).is_file()
+
+
+def test_a_file_is_shown_selected_in_its_folder_on_each_system(monkeypatch, tmp_path):
+    """
+    Showing a file asks the file manager of the system to open the folder holding it, with the file selected
+    where the file manager can do that.
+    """
+    commands: list[list[str]] = []
+    monkeypatch.setattr(paths.subprocess, "Popen", commands.append)
+    shown_file = tmp_path / "Old list" / "Darude - Feel the Beat.mp3"
+    for platform in ("win32", "darwin", "linux"):
+        monkeypatch.setattr(sys, "platform", platform)
+        paths.show_in_folder(shown_file)
+    assert commands == [
+        ["explorer", f"/select,{shown_file}"],
+        ["open", "-R", str(shown_file)],
+        ["xdg-open", str(shown_file.parent)],
+    ]

@@ -7,7 +7,7 @@ import queue
 import sys
 import threading
 import tkinter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -18,12 +18,13 @@ from tandem_dj.config import ConfigurationError, Settings, default_settings, loa
 from tandem_dj.diagnostics import describe_setup
 from tandem_dj.logs import current_log_path, hide_secret, write_error_log, write_log
 from tandem_dj.models import TEXT_ORIGIN, Track, TrackCollection
-from tandem_dj.paths import APPLICATION_NAME, log_directory, open_folder
+from tandem_dj.paths import APPLICATION_NAME, log_directory, open_folder, show_in_folder
 from tandem_dj.progress import (
     STATUS_ALREADY_DOWNLOADED,
     STATUS_DOWNLOADED,
     STATUS_DOWNLOADING,
     STATUS_FAILED,
+    STATUS_SEARCHING,
     STATUS_WAITING,
     ProgressTracker,
     TrackProgress,
@@ -38,6 +39,7 @@ from tandem_dj.sockseek import (
     input_row,
     remove_duplicates,
 )
+from tandem_dj.source_history import read_tried_sources, remember_tried_sources, source_history_path
 from tandem_dj.sources import SourceError, read_track_lines, read_tracks
 from tandem_dj.text_cleaning import track_key
 from tandem_dj.ui import theme
@@ -51,6 +53,8 @@ from tandem_dj.workflow import (
     LEVEL_SUCCESS,
     LEVEL_WARNING,
     DownloadCancelled,
+    DownloadControl,
+    TrackRequest,
     run_download,
 )
 
@@ -59,6 +63,19 @@ WINDOW_SIZE = "1400x800"
 PROGRESS_BAR_CELLS = 10
 REFRESH_INTERVAL_MILLISECONDS = 300
 VPN_MESSAGE_PREFIX = "VPN: "
+UNFINISHED_STATUSES = (STATUS_WAITING, STATUS_SEARCHING, STATUS_DOWNLOADING)
+FILE_STATUSES = (STATUS_DOWNLOADED, STATUS_FOUND_RELAXED, STATUS_ALREADY_DOWNLOADED)
+MENU_DOWNLOAD = "Download"
+MENU_DOWNLOAD_AGAIN = "Download again"
+MENU_OTHER_SOURCE = "Download from another source"
+MENU_LEAVE_SOURCE = "Leave this source now (the other transfers in progress start over)"
+MENU_SHOW_FILE = "Show the file in its folder"
+MENU_COPY = "Copy artist and title"
+MENU_SELECT_MISSING = "Select every track that is not downloaded"
+REPLACE_QUESTION = (
+    "{count} of the selected tracks already have a file.\n\n"
+    "Download again and replace it? The file you have is only deleted once another one was downloaded."
+)
 LOG_FILE_LEVELS = {
     LEVEL_INFORMATION: logging.INFO,
     LEVEL_SUCCESS: logging.INFO,
@@ -86,7 +103,8 @@ class MainWindow(tkinter.Tk):
     Window of the application, in the style of a file sharing client.
 
     Reading websites and downloading run in a background thread that reports back through a queue, so the window
-    stays responsive. Everything shown in the log pane is also written to the log file.
+    stays responsive. Everything shown in the log pane is also written to the log file. A right click on tracks
+    opens a menu to download them again, alone, during a download or after it.
 
     :param config_path: Settings file to use, ``None`` for ``config.toml`` in the user data folder
     """
@@ -104,6 +122,14 @@ class MainWindow(tkinter.Tk):
         self.messages: queue.Queue[tuple] = queue.Queue()
         self.close_when_idle = False
         self.sort_order = SortOrder()
+        self.control = DownloadControl()
+        self.report = DownloadReport()
+        self.batch_directory: Path | None = None
+        self.is_downloading = False
+        self.row_tracks: dict[str, Track] = {}
+        self.saved_files: dict[Track, str] = {}
+        self.tried_sources: dict[Track, tuple[str, ...]] = {}
+        self.rows_before_request: dict[str, tuple[tuple, tuple]] = {}
 
         self.title(WINDOW_TITLE)
         self.geometry(WINDOW_SIZE)
@@ -151,11 +177,12 @@ class MainWindow(tkinter.Tk):
 
     def _build_track_table(self) -> None:
         """
-        Create the table listing every track with its live status. A click on a heading sorts by that column.
+        Create the table listing every track with its live status. A click on a heading sorts by that column, and
+        a right click on tracks opens the menu acting on them.
         """
         frame = ttk.Frame(self, padding=(10, 4))
         frame.pack(fill="both", expand=True)
-        self.table = ttk.Treeview(frame, columns=[name for name, *_ in COLUMNS], show="headings", selectmode="browse")
+        self.table = ttk.Treeview(frame, columns=[name for name, *_ in COLUMNS], show="headings", selectmode="extended")
         for name, _, width, anchor in COLUMNS:
             self.table.heading(name, anchor=anchor, command=lambda column=name: self._on_sort(column))
             self.table.column(name, width=width, anchor=anchor, stretch=name in ("title", "detail", "notes"))
@@ -170,6 +197,27 @@ class MainWindow(tkinter.Tk):
         horizontal_scrollbar.grid(row=1, column=0, sticky="ew")
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
+        self._build_table_menu()
+
+    def _build_table_menu(self) -> None:
+        """
+        Create the menu opened by a right click on tracks. Its entries are enabled when it opens, according to
+        the selected tracks.
+        """
+        self.table_menu = tkinter.Menu(self, tearoff=False)
+        theme.style_menu(self.table_menu)
+        self.table_menu.add_command(label=MENU_DOWNLOAD_AGAIN, command=self._on_download_again)
+        self.table_menu.add_command(label=MENU_OTHER_SOURCE, command=self._on_download_from_another_source)
+        self.table_menu.add_command(label=MENU_LEAVE_SOURCE, command=self._on_leave_source)
+        self.table_menu.add_separator()
+        self.table_menu.add_command(label=MENU_SHOW_FILE, command=self._on_show_file)
+        self.table_menu.add_command(label=MENU_COPY, command=self._on_copy)
+        self.table_menu.add_separator()
+        self.table_menu.add_command(label=MENU_SELECT_MISSING, command=self._on_select_missing)
+        right_click_events = ("<Button-2>", "<Control-Button-1>") if sys.platform == "darwin" else ("<Button-3>",)
+        for event_name in right_click_events:
+            self.table.bind(event_name, self._on_table_menu)
+        self.table.bind("<Control-a>", lambda event: self.table.selection_set(self.table.get_children()))
 
     def _build_summary_bar(self) -> None:
         """
@@ -299,6 +347,278 @@ class MainWindow(tkinter.Tk):
         self._show_sort_order()
         self._sort_rows()
 
+    def _on_table_menu(self, event: tkinter.Event) -> None:
+        """
+        Open the menu of the tracks under a right click. A click outside the selection selects the clicked track.
+
+        :param event: The right click
+        """
+        row = self.table.identify_row(event.y)
+        if row and row not in self.table.selection():
+            self.table.selection_set(row)
+        if not self.table.selection():
+            return
+        self._update_table_menu()
+        self.table_menu.tk_popup(event.x_root, event.y_root)
+
+    def _update_table_menu(self) -> None:
+        """
+        Enable the entries of the track menu that apply to the selected tracks.
+        """
+        tracks = self._selected_tracks()
+        free_tracks = self._free_tracks(tracks)
+        was_tried = any(self._sources_of(track) or self._has_file(track) for track in free_tracks)
+        states = {
+            0: bool(free_tracks),
+            1: any(self._sources_of(track) for track in free_tracks),
+            2: bool(self._sources_in_use(tracks)),
+            4: any(self._has_file(track) for track in tracks),
+            5: bool(tracks),
+            7: bool(self.row_tracks),
+        }
+        for index, is_enabled in states.items():
+            self.table_menu.entryconfigure(index, state="normal" if is_enabled else "disabled")
+        self.table_menu.entryconfigure(0, label=MENU_DOWNLOAD_AGAIN if was_tried else MENU_DOWNLOAD)
+
+    def _on_download_again(self) -> None:
+        """
+        Download the selected tracks again, each one preferably from the source it came from last time.
+        """
+        tracks = self._free_tracks(self._selected_tracks())
+        if not tracks or not self._may_replace_files(tracks):
+            return
+        last_sources = [self._sources_of(track)[-1] for track in tracks if self._sources_of(track)]
+        self._queue_request(
+            TrackRequest(
+                tuple(tracks),
+                preferred_sources=tuple(dict.fromkeys(last_sources)),
+                replace_files=any(self._has_file(track) for track in tracks),
+            )
+        )
+
+    def _on_download_from_another_source(self) -> None:
+        """
+        Download the selected tracks again, from other sources than the ones already tried for them.
+        """
+        tracks = [track for track in self._free_tracks(self._selected_tracks()) if self._sources_of(track)]
+        if not tracks or not self._may_replace_files(tracks):
+            return
+        avoided_sources = tuple(dict.fromkeys(source for track in tracks for source in self._sources_of(track)))
+        self._queue_request(TrackRequest(tuple(tracks), avoided_sources=avoided_sources, replace_files=True))
+
+    def _on_leave_source(self) -> None:
+        """
+        Make the running download give up the sources the selected tracks are being transferred from.
+        """
+        for source in self._sources_in_use(self._selected_tracks()):
+            if self.control.skip_source(source):
+                self._log(
+                    f"Leaving the source {source}: sockseek is started again without it, on the tracks that are not "
+                    "downloaded yet. The other transfers in progress start over.",
+                    LEVEL_WARNING,
+                )
+
+    def _on_show_file(self) -> None:
+        """
+        Show the file of the first selected track that has one, in the file manager.
+        """
+        for track in self._selected_tracks():
+            if self._has_file(track):
+                try:
+                    show_in_folder(Path(self._file_of(track)))
+                except OSError as error:
+                    messagebox.showerror(WINDOW_TITLE, f"The file could not be shown: {error}", parent=self)
+                return
+
+    def _on_copy(self) -> None:
+        """
+        Copy the selected tracks to the clipboard, one ``Artist - Title`` per line, as sent to sockseek.
+        """
+        lines = []
+        for row in self._selected_rows():
+            artist, title = self.table.set(row, "artist"), self.table.set(row, "title")
+            lines.append(f"{artist} - {title}" if artist else title)
+        self.clipboard_clear()
+        self.clipboard_append("\n".join(lines))
+
+    def _on_select_missing(self) -> None:
+        """
+        Select every track that has no file yet, ready to be downloaded again in one go.
+        """
+        missing_rows = [row for row in self.table.get_children() if self.table.set(row, "status") not in FILE_STATUSES]
+        self.table.selection_set(missing_rows)
+        if missing_rows:
+            self.table.see(missing_rows[0])
+
+    def _selected_rows(self) -> list[str]:
+        """
+        List the selected rows in the order they are displayed.
+
+        :returns: Row identifiers
+        """
+        selection = set(self.table.selection())
+        return [row for row in self.table.get_children() if row in selection]
+
+    def _selected_tracks(self) -> list[Track]:
+        """
+        List the selected tracks in the order they are displayed.
+
+        :returns: The tracks
+        """
+        return [self.row_tracks[row] for row in self._selected_rows() if row in self.row_tracks]
+
+    def _is_working(self) -> bool:
+        """
+        Tell whether the background thread is reading or downloading.
+
+        :returns: ``True`` while it runs
+        """
+        return self.worker is not None and self.worker.is_alive()
+
+    def _live_entries(self) -> dict[Track, TrackProgress]:
+        """
+        Read the live progress of the tracks the running download follows.
+
+        :returns: Progress by track; empty when no download was started
+        """
+        return {entry.track: entry for entry in (self.tracker.snapshot() if self.tracker else [])}
+
+    def _free_tracks(self, tracks: Sequence[Track]) -> list[Track]:
+        """
+        Pick the tracks a new download can be asked for: all of them when nothing runs, and during a download the
+        ones it is done with. None while a list is being read, since the table is about to change.
+
+        :param tracks: Tracks to choose from
+        :returns: The tracks that are neither waiting, being searched nor being transferred
+        """
+        if not self._is_working():
+            return list(tracks)
+        if not self.is_downloading or self.tracker is None:
+            return []
+        live_entries, queued_tracks = self._live_entries(), self.control.queued_tracks()
+        return [
+            track
+            for track in tracks
+            if track not in queued_tracks
+            and (track not in live_entries or live_entries[track].status not in UNFINISHED_STATUSES)
+        ]
+
+    def _sources_of(self, track: Track) -> tuple[str, ...]:
+        """
+        List the Soulseek users a track was tried from, during this download and earlier ones.
+
+        :param track: Track to look up
+        :returns: User names, the most recent last
+        """
+        live_entry = self._live_entries().get(track)
+        live_sources = live_entry.sources if live_entry is not None else ()
+        return tuple(dict.fromkeys((*self.tried_sources.get(track, ()), *live_sources)))
+
+    def _sources_in_use(self, tracks: Sequence[Track]) -> list[str]:
+        """
+        List the Soulseek users some tracks are being transferred from right now.
+
+        :param tracks: Tracks to look at
+        :returns: User names; empty when no download runs
+        """
+        if not self._is_working():
+            return []
+        live_entries = self._live_entries()
+        sources = [
+            live_entries[track].sources[-1]
+            for track in tracks
+            if track in live_entries
+            and live_entries[track].status == STATUS_DOWNLOADING
+            and live_entries[track].sources
+        ]
+        return list(dict.fromkeys(sources))
+
+    def _file_of(self, track: Track) -> str:
+        """
+        Tell which file a track was saved as, by the running download or by an earlier one.
+
+        :param track: Track to look up
+        :returns: Path of the file or album folder, empty when the track has none
+        """
+        live_entry = self._live_entries().get(track)
+        if live_entry is not None and live_entry.status == STATUS_DOWNLOADED and live_entry.saved_path:
+            return live_entry.saved_path
+        return self.saved_files.get(track, "")
+
+    def _has_file(self, track: Track) -> bool:
+        """
+        Tell whether the file a track was saved as is still there.
+
+        :param track: Track to look up
+        :returns: ``True`` when the track has a file, or an album folder
+        """
+        file_path = self._file_of(track)
+        return bool(file_path) and Path(file_path).exists()
+
+    def _may_replace_files(self, tracks: Sequence[Track]) -> bool:
+        """
+        Ask before downloading again tracks that already have a file, which the new download replaces.
+
+        :param tracks: Tracks about to be downloaded again
+        :returns: ``False`` when the user would rather keep the files
+        """
+        file_count = sum(self._has_file(track) for track in tracks)
+        if not file_count:
+            return True
+        return bool(messagebox.askyesno(WINDOW_TITLE, REPLACE_QUESTION.format(count=file_count), parent=self))
+
+    def _queue_request(self, request: TrackRequest) -> None:
+        """
+        Hand a request to the running download, or start a download for it when none runs.
+
+        :param request: Tracks to download, and how
+        """
+        if not self.settings.soulseek_username:
+            self._on_settings()
+            return
+        description = _describe_request(request)
+        names = ", ".join(track.display_name for track in request.tracks)
+        self._log(f"Queued, {description}: {names}", LEVEL_INFORMATION)
+        for track in request.tracks:
+            row = _row_identifier(track)
+            if self.table.exists(row):
+                self.rows_before_request.setdefault(row, (self.table.item(row, "values"), self.table.item(row, "tags")))
+            self._show_row(track, STATUS_WAITING, "", None, f"queued: {description}")
+        if self.tracker is not None and self._is_working():
+            self.tracker.expect(request.tracks, f"queued: {description}")
+        self.control.add_request(request)
+        self._sort_rows()
+        self._start_request_worker()
+
+    def _start_request_worker(self) -> None:
+        """
+        Start a download for the queued requests, unless the background thread is already at work: a running
+        download takes them by itself.
+        """
+        if self._is_working():
+            return
+        request = self.control.next_request()
+        if request is None:
+            return
+        self.stop_requested.clear()
+        self._set_busy(True, downloading=True)
+        settings = self.settings
+        self.worker = threading.Thread(
+            target=self._work, args=(lambda: self._download(settings, request),), name="tandem-worker"
+        )
+        self.worker.start()
+
+    def _drop_queued_requests(self) -> None:
+        """
+        Forget the requests no download took, and show their tracks as they were before they were queued.
+        """
+        self.control.clear_requests()
+        for row, (values, tags) in self.rows_before_request.items():
+            if self.table.exists(row):
+                self.table.item(row, values=values, tags=tags)
+        self.rows_before_request.clear()
+        self._sort_rows()
+
     def _on_open_logs(self) -> None:
         """
         Show the folder holding the log files, where the most recent file is the one of this launch.
@@ -313,7 +633,7 @@ class MainWindow(tkinter.Tk):
         """
         Close the window, stopping a running download first so the VPN is never left on by accident.
         """
-        if self.worker is not None and self.worker.is_alive():
+        if self._is_working():
             if not messagebox.askyesno(WINDOW_TITLE, "A download is running. Stop it and quit?", parent=self):
                 return
             self.close_when_idle = True
@@ -327,7 +647,7 @@ class MainWindow(tkinter.Tk):
 
         :param download_afterwards: Whether to download once the tracks are known
         """
-        if self.worker is not None and self.worker.is_alive():
+        if self._is_working():
             return
         pasted_text = self.input_box.get("1.0", "end").strip()
         if not pasted_text:
@@ -337,27 +657,36 @@ class MainWindow(tkinter.Tk):
             self._on_settings()
             return
         must_read = pasted_text != self.read_input or not self.requested_tracks
-        self.stop_requested.clear()
-        self._set_busy(True, downloading=download_afterwards)
-        self.worker = threading.Thread(
-            target=self._work, args=(pasted_text, must_read, download_afterwards, self.settings), name="tandem-worker"
-        )
-        self.worker.start()
+        settings = self.settings
 
-    def _work(self, pasted_text: str, must_read: bool, download_afterwards: bool, settings: Settings) -> None:
-        """
-        Read the tracks and optionally download them. Runs in the background thread.
-
-        :param pasted_text: Content of the input box
-        :param must_read: Whether the tracks have to be read again
-        :param download_afterwards: Whether to download once the tracks are known
-        :param settings: Settings in use when the work started
-        """
-        try:
+        def read_then_download() -> None:
+            """
+            Read the tracks when the input changed, then download them when asked to.
+            """
             if must_read:
                 self._read(pasted_text, settings)
             if download_afterwards and self.requested_tracks:
                 self._download(settings)
+
+        self.stop_requested.clear()
+        self.tracker = None
+        self._set_busy(True, downloading=download_afterwards)
+        self.worker = threading.Thread(target=self._work, args=(read_then_download,), name="tandem-worker")
+        self.worker.start()
+
+    def _work(self, action: Callable[[], None]) -> None:
+        """
+        Do some reading or downloading, telling the user about what goes wrong. Runs in the background thread.
+
+        When it ends, the window is told whether the queued requests may be started: not after an error, a
+        refusal or a stop, which would only happen again.
+
+        :param action: The work to do
+        """
+        was_completed = False
+        try:
+            action()
+            was_completed = True
         except DownloadCancelled:
             self._log("Download cancelled: nothing was downloaded.", LEVEL_WARNING)
         except (SourceError, DownloadError, VpnError) as error:
@@ -368,7 +697,7 @@ class MainWindow(tkinter.Tk):
             self._log(f"Unexpected error: {type(error).__name__}: {error}", LEVEL_ERROR)
             self.messages.put(("error", "Unexpected error. The details are in the log file (Open logs folder)."))
         finally:
-            self.messages.put(("idle",))
+            self.messages.put(("idle", was_completed and not self.stop_requested.is_set()))
 
     def _read(self, pasted_text: str, settings: Settings) -> None:
         """
@@ -403,25 +732,33 @@ class MainWindow(tkinter.Tk):
             write_log("Already downloaded, with the file still there (track -> file):")
         for track, file_path in already_downloaded.items():
             write_log(f"  {track.display_name}  ->  {file_path}")
+        tried_sources = read_tried_sources(source_history_path(settings), unique_tracks)
         self.requested_tracks = unique_tracks
         self.collection = collection
         self.read_input = pasted_text
-        self.messages.put(("tracks", collection, unique_tracks, duplicate_count, already_downloaded))
+        self.batch_directory = None
+        self.control.clear_requests()
+        self.messages.put(("tracks", collection, unique_tracks, duplicate_count, already_downloaded, tried_sources))
 
-    def _download(self, settings: Settings) -> None:
+    def _download(self, settings: Settings, request: TrackRequest | None = None) -> None:
         """
-        Download the read tracks into a new folder and hand the outcome to the window. Runs in the background
-        thread.
+        Download the read tracks into a new folder, or only the tracks of a request into the folder of the last
+        download of this list, and hand the outcome to the window. Runs in the background thread.
 
         :param settings: Settings in use
+        :param request: Tracks to download and how, ``None`` for every track of the list
         :raises DownloadError: If sockseek or the download folder is not available
         :raises VpnError: If the VPN cannot be connected or confirmed
         :raises DownloadCancelled: If the user answered no to the question asked before the download
         """
-        tracker = ProgressTracker(self.requested_tracks)
+        tracker = ProgressTracker(self.requested_tracks, followed=request is None)
         self.messages.put(("tracker", tracker))
-        batch_directory = settings.output_directory / batch_folder_name(self.collection, datetime.now())
-        self._log(f"This download is saved in a folder of its own: {batch_directory}", LEVEL_INFORMATION)
+        if request is None or self.batch_directory is None:
+            self.batch_directory = settings.output_directory / batch_folder_name(self.collection, datetime.now())
+            self._log(f"This download is saved in a folder of its own: {self.batch_directory}", LEVEL_INFORMATION)
+        else:
+            self._log(f"Saved in the folder of the last download of this list: {self.batch_directory}")
+        batch_directory = self.batch_directory
         downloader = SockseekDownloader(settings, batch_directory)
         input_path = downloader.input_path_for(self.collection.display_name)
         self._log(
@@ -438,6 +775,17 @@ class MainWindow(tkinter.Tk):
             if log_text and log_text.strip():
                 self._log(log_text, LEVEL_INFORMATION)
 
+        def follow_request(next_request: TrackRequest) -> None:
+            """
+            Follow the tracks of a request that is about to be fulfilled, and say what is particular about it.
+
+            :param next_request: Tracks about to be downloaded, and how
+            """
+            tracker.expect(next_request.tracks)
+            if next_request != TrackRequest(tuple(self.requested_tracks)):
+                names = ", ".join(track.display_name for track in next_request.tracks)
+                self._log(f"Now, {_describe_request(next_request)}: {names}", LEVEL_INFORMATION)
+
         report = run_download(
             settings,
             self.requested_tracks,
@@ -448,6 +796,9 @@ class MainWindow(tkinter.Tk):
             on_output_line=handle_output_line,
             keep_running=lambda: not self.stop_requested.is_set(),
             on_search_variants=tracker.follow_variants,
+            request=request,
+            control=self.control,
+            on_request=follow_request,
         )
         self.messages.put(("finished", report, batch_directory))
 
@@ -499,9 +850,9 @@ class MainWindow(tkinter.Tk):
                 self._handle_message(self.messages.get_nowait())
         except queue.Empty:
             pass
-        if self.tracker is not None and self.worker is not None and self.worker.is_alive():
+        if self.tracker is not None and self._is_working():
             self._show_progress()
-        if self.close_when_idle and (self.worker is None or not self.worker.is_alive()):
+        if self.close_when_idle and not self._is_working():
             self.destroy()
             return
         self.after(REFRESH_INTERVAL_MILLISECONDS, self._refresh)
@@ -534,6 +885,10 @@ class MainWindow(tkinter.Tk):
         elif kind == "idle":
             self._set_busy(False)
             self._show_vpn_state()
+            if message[1] and not self.close_when_idle:
+                self._start_request_worker()
+            else:
+                self._drop_queued_requests()
 
     def _append_log(self, text: str, level: str) -> None:
         """
@@ -555,6 +910,7 @@ class MainWindow(tkinter.Tk):
         tracks: list[Track],
         duplicate_count: int,
         already_downloaded: Mapping[Track, str],
+        tried_sources: Mapping[Track, tuple[str, ...]] | None = None,
     ) -> None:
         """
         Fill the table with freshly read tracks, exactly as they will be sent to sockseek.
@@ -563,8 +919,14 @@ class MainWindow(tkinter.Tk):
         :param tracks: Tracks that will be sent to sockseek
         :param duplicate_count: Number of parsed tracks left out as duplicates
         :param already_downloaded: File of each track an earlier download saved and that is still there
+        :param tried_sources: Soulseek users each track was tried from by earlier downloads
         """
         self.tracker = None
+        self.report = DownloadReport()
+        self.saved_files = dict(already_downloaded)
+        self.tried_sources = dict(tried_sources or {})
+        self.rows_before_request.clear()
+        self.row_tracks = {_row_identifier(track): track for track in tracks}
         self.table.delete(*self.table.get_children())
         for number, track in enumerate(tracks, start=1):
             sent_values = input_row(track)
@@ -595,7 +957,8 @@ class MainWindow(tkinter.Tk):
         self._sort_rows()
         self.overall_bar.configure(maximum=max(len(tracks), 1), value=0)
         self.summary_label.configure(
-            text="Artist and Title are exactly what sockseek receives. Check them, then Download."
+            text="Artist and Title are exactly what sockseek receives. Check them, then Download. "
+            "Right-click tracks to download only those."
         )
 
     def _show_sort_order(self) -> None:
@@ -668,17 +1031,15 @@ class MainWindow(tkinter.Tk):
 
     def _show_report(self, report: DownloadReport, batch_directory: Path) -> None:
         """
-        Show the final outcome of a download: the file each track was saved as, the folder holding them, and what
-        is missing.
+        Show the outcome of a download: the file each track was saved as, the folder holding them, and what is
+        missing. The counts cover every download of the list so far, so that tracks downloaded one by one add up.
 
         :param report: Outcome of the run
         :param batch_directory: Folder the files of this download were saved in; missing when nothing was saved
         """
         if self.tracker is not None:
             self._show_progress()
-        live_entries = {
-            _row_identifier(entry.track): entry for entry in (self.tracker.snapshot() if self.tracker else [])
-        }
+        live_entries = self._live_entries()
         for track in report.downloaded:
             file_name = Path(report.saved_files.get(track, "")).name
             relaxed_match = report.relaxed_matches.get(track)
@@ -686,45 +1047,73 @@ class MainWindow(tkinter.Tk):
                 track,
                 STATUS_FOUND_RELAXED if relaxed_match else STATUS_DOWNLOADED,
                 _draw_bar(100),
-                live_entries.get(_row_identifier(track)),
+                live_entries.get(track),
                 f'saved as {file_name}, found by searching "{relaxed_match.query}": check it'
                 if relaxed_match
                 else f"saved as {file_name}",
             )
         for track in report.already_downloaded:
-            self._show_row(
-                track, STATUS_ALREADY_DOWNLOADED, "", None, _describe_existing_file(report.saved_files.get(track, ""))
-            )
+            detail = report.notes.get(track) or _describe_existing_file(report.saved_files.get(track, ""))
+            self._show_row(track, STATUS_ALREADY_DOWNLOADED, "", None, detail)
         for track in report.failed:
-            entry = live_entries.get(_row_identifier(track))
+            entry = live_entries.get(track)
             self._show_row(track, STATUS_FAILED, "", None, entry.detail if entry else "not found or failed")
         for track in report.not_attempted:
-            self._show_row(track, STATUS_NOT_FINISHED, "", None, "run Download again to retry")
+            self._show_row(track, STATUS_NOT_FINISHED, "", None, "right-click to download it, or run Download again")
+        self._keep_outcome(report, live_entries)
         self._sort_rows()
-        finished_count = len(report.downloaded) + len(report.already_downloaded) + len(report.failed)
-        self.overall_bar.configure(value=finished_count)
+        totals = self.report
+        finished_count = len(totals.downloaded) + len(totals.already_downloaded) + len(totals.failed)
+        self.overall_bar.configure(maximum=max(len(self.row_tracks), finished_count, 1), value=finished_count)
         relaxed_note = (
-            f" ({len(report.relaxed_matches)} found under a simpler spelling: check them)"
-            if report.relaxed_matches
+            f" ({len(totals.relaxed_matches)} found under a simpler spelling: check them)"
+            if totals.relaxed_matches
             else ""
         )
         text = (
-            f"Finished: {len(report.downloaded)} downloaded{relaxed_note}, "
-            f"{len(report.already_downloaded)} already had, "
-            f"{len(report.failed)} not found or failed, {len(report.not_attempted)} not finished."
+            f"Finished: {len(totals.downloaded)} downloaded{relaxed_note}, "
+            f"{len(totals.already_downloaded)} already had, "
+            f"{len(totals.failed)} not found or failed, {len(totals.not_attempted)} not finished."
         )
         self.summary_label.configure(text=text)
-        self._log(text, LEVEL_SUCCESS if not (report.failed or report.not_attempted) else LEVEL_WARNING)
+        self._log(text, LEVEL_SUCCESS if not (totals.failed or totals.not_attempted) else LEVEL_WARNING)
         for label, unfinished_tracks in (
             ("Not found or failed", report.failed),
             ("Not finished", report.not_attempted),
         ):
             for track in unfinished_tracks:
                 self._log(f"  {label}: {track.display_name}", LEVEL_WARNING)
+        if report.failed or report.not_attempted:
+            self._log(
+                "Right-click a track to download it again, or from another source; "
+                f'"{MENU_SELECT_MISSING}" in that menu selects all of the above.',
+                LEVEL_INFORMATION,
+            )
         if batch_directory.is_dir():
             self._log(f"The files of this download are in {batch_directory}", LEVEL_SUCCESS)
         else:
             self._log("Nothing new was saved, so no folder was created for this download.", LEVEL_INFORMATION)
+
+    def _keep_outcome(self, report: DownloadReport, live_entries: Mapping[Track, TrackProgress]) -> None:
+        """
+        Remember what a download found out: the outcome and the file of its tracks, and the Soulseek users they
+        were tried from, which are also written down for later launches.
+
+        :param report: Outcome of the run
+        :param live_entries: Live progress of the tracks the run followed
+        """
+        self.report.merge(report)
+        for track in report.tracks:
+            self.rows_before_request.pop(_row_identifier(track), None)
+            self.saved_files.pop(track, None)
+        self.saved_files.update(report.saved_files)
+        new_sources = {track: entry.sources for track, entry in live_entries.items() if entry.sources}
+        for track, sources in new_sources.items():
+            self.tried_sources[track] = tuple(dict.fromkeys((*self.tried_sources.get(track, ()), *sources)))
+        try:
+            remember_tried_sources(source_history_path(self.settings), new_sources)
+        except OSError as error:
+            self._log(f"The sources that were tried could not be written down: {error}", LEVEL_WARNING)
 
     def _set_busy(self, is_busy: bool, downloading: bool = False) -> None:
         """
@@ -733,6 +1122,7 @@ class MainWindow(tkinter.Tk):
         :param is_busy: Whether background work is running
         :param downloading: Whether that work includes a download, which can be stopped
         """
+        self.is_downloading = is_busy and downloading
         idle_state = "disabled" if is_busy else "normal"
         self.read_button.configure(state=idle_state)
         self.download_button.configure(state=idle_state)
@@ -748,6 +1138,20 @@ class _Answer:
     def __init__(self) -> None:
         self.is_yes = False
         self.given = threading.Event()
+
+
+def _describe_request(request: TrackRequest) -> str:
+    """
+    Say in a few words how the tracks of a request are downloaded.
+
+    :param request: Tracks to download, and how
+    :returns: Text such as ``download from another source than peer``
+    """
+    if request.avoided_sources:
+        return f"download from another source than {', '.join(request.avoided_sources)}"
+    if request.preferred_sources:
+        return f"download again, preferably from {', '.join(request.preferred_sources)}"
+    return "download again" if request.replace_files else "download"
 
 
 def _row_identifier(track: Track) -> str:

@@ -33,8 +33,9 @@ src/tandem_dj/
   workflow.py        run_download(): VPN + sockseek + conversion; TrackRequest, DownloadControl
   batch_folder.py    batch_folder_name(): the folder of one download, named after playlist, website and time
   progress.py        ProgressTracker: per-track live state rebuilt from sockseek's JSON progress events
+  source_history.py  remember_tried_sources() / read_tried_sources(): who each track was tried from, kept in a file
   ui/
-    main_window.py   MainWindow (tkinter): input box, track table, summary bar, log pane
+    main_window.py   MainWindow (tkinter): input box, track table with its right-click menu, summary bar, log pane
     settings_dialog.py  SettingsDialog: edits and saves config.toml
     table_sort.py    SortOrder, sorted_rows(), sort_value(): the order of the rows after a click on a heading
     theme.py         dark muted retro look (beige on warm black, green accent), status and log colours
@@ -69,8 +70,8 @@ vendor/sockseek/     the sockseek program (untracked, >100 MB), its licence, and
 
 Nothing is written inside the repository at run time. Settings, history and logs live in the user data folder
 (`paths.user_data_directory()`): `%APPDATA%\Tandem DJ` on Windows, `~/Library/Application Support/Tandem DJ` on
-macOS. It holds `config.toml` (with the Soulseek password), `data/sockseek_index.csv`, `data/inputs/*.csv` and
-`logs/`. The `TANDEM_DJ_HOME` environment variable replaces that location.
+macOS. It holds `config.toml` (with the Soulseek password), `data/sockseek_index.csv`, `data/tried_sources.json`,
+`data/inputs/*.csv` and `logs/`. The `TANDEM_DJ_HOME` environment variable replaces that location.
 
 ## How it fits together
 
@@ -129,6 +130,29 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 - With a listener, sockseek runs with `--progress-json` and its output is piped: JSON lines update the
   `ProgressTracker`, other lines go to the log. `download_progress` events carry a `jobId` but no artist or title,
   so the tracker attaches each job to the downloading track whose announced file size matches.
+- **A right click on tracks opens `table_menu`** (several rows can be selected). Its entries are fixed;
+  `_update_table_menu()` enables the ones that apply when it opens. "Download (again)" and "Download from another
+  source" build a `TrackRequest` and hand it to `_queue_request()`, which adds it to `self.control`: a running
+  download fulfils it before it ends, otherwise `_start_request_worker()` starts one for it. "Leave this source
+  now" calls `control.skip_source()`. The user asked for exactly these: retry one track without running the
+  batch again, the same source, the next best source, and a way out of a transfer stuck at 0 kB/s.
+- **Which tracks can be asked again** is `_free_tracks()`: all when nothing runs, the ones the running download is
+  done with otherwise, none while a list is being read (the table is about to change).
+- A queued track shows `Waiting` with `queued: ...`; what its row showed before is kept in
+  `rows_before_request` and put back by `_drop_queued_requests()` when the work ended on an error, a refusal or a
+  stop. The `idle` message says whether queued requests may start (`_work()` knows how the work ended); starting
+  them after a failure would only fail again.
+- **Requests save into the folder of the last download of the list** (`self.batch_directory`, forgotten when a new
+  list is read). Only a click on Download makes a new folder.
+- `self.report` adds up every download of the list shown (`DownloadReport.merge()`), so the summary counts tracks
+  downloaded one by one. `_show_report()` only redraws the rows of the run that just ended.
+- A download for requests follows only their tracks: `ProgressTracker(tracks, followed=False)` shows nothing until
+  `expect()` names tracks, so the rows of the other tracks keep what they show.
+- **Who a track was tried from** is `_sources_of()`: the live `TrackProgress.sources` plus what
+  `source_history.py` kept from earlier downloads in `data/tried_sources.json`, read when a list is read and
+  written after every download. The sockseek index does not hold user names, hence the file.
+- With several tracks selected, "Download from another source" avoids the sources of all of them for all of them:
+  sockseek takes one list of banned users per run, and one run per track would mean one login per track.
 - A click on a heading sorts the table by that column, a second click reverses it, and an arrow in the heading
   shows the direction (`ui/table_sort.py`, no Tk in it). The order is applied again after every redraw, so rows
   move as their status changes; `#` gives the order of the track list back. `sort_value()` reads quantities

@@ -4,7 +4,7 @@ Live download progress, rebuilt from the JSON events sockseek prints with ``--pr
 
 import json
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import PureWindowsPath
@@ -39,12 +39,17 @@ class ProgressTracker:
     Lines of sockseek output are fed to :meth:`handle_line` from the thread reading them, while a user interface
     reads :meth:`snapshot` and :meth:`summary` from its own thread.
 
-    :param tracks: Tracks requested from sockseek, in the order they are displayed
+    :param tracks: Tracks of the list, in the order they are displayed
+    :param followed: Whether every track is part of the run from the start; with ``False``, a track only shows up
+        in :meth:`snapshot` and :meth:`summary` once :meth:`expect` named it
     """
 
-    def __init__(self, tracks: list[Track]) -> None:
+    def __init__(self, tracks: list[Track], followed: bool = True) -> None:
         self._lock = threading.Lock()
-        self._entries = {track_key(track.primary_artist, track.title): TrackProgress(track=track) for track in tracks}
+        self._entries = {
+            track_key(track.primary_artist, track.title): TrackProgress(track=track, is_followed=followed)
+            for track in tracks
+        }
         self._entry_by_job: dict[str, TrackProgress] = {}
         self._entry_by_variant: dict[tuple[str, str], TrackProgress] = {}
         self._started_at: datetime | None = None
@@ -70,6 +75,25 @@ class ProgressTracker:
             self._handle_event(event)
         return None
 
+    def expect(self, tracks: Iterable[Track], detail: str = "") -> None:
+        """
+        Expect sockseek to work on some tracks, again or for the first time: they wait, whatever happened to them
+        before, and are followed from now on. The users they were tried from are kept.
+
+        :param tracks: Tracks about to be requested from sockseek
+        :param detail: What to tell about them while they wait
+        """
+        with self._lock:
+            for track in tracks:
+                entry = self._entries.get(track_key(track.primary_artist, track.title))
+                if entry is None:
+                    continue
+                self._entry_by_job = {job: other for job, other in self._entry_by_job.items() if other is not entry}
+                entry.is_followed = True
+                entry.status, entry.detail, entry.relaxed_query, entry.saved_path = STATUS_WAITING, detail, "", ""
+                entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
+                entry.progress_at = None
+
     def follow_variants(self, variants: Mapping[Track, SearchVariant]) -> None:
         """
         Expect the next events of some tracks under another spelling, as when they are searched again.
@@ -91,12 +115,12 @@ class ProgressTracker:
 
     def snapshot(self) -> list["TrackProgress"]:
         """
-        Copy the current progress of every track.
+        Copy the current progress of every followed track.
 
-        :returns: One entry per requested track, in display order
+        :returns: One entry per followed track, in display order
         """
         with self._lock:
-            return [TrackProgress(**vars(entry)) for entry in self._entries.values()]
+            return [TrackProgress(**vars(entry)) for entry in self._entries.values() if entry.is_followed]
 
     def summary(self) -> "ProgressSummary":
         """
@@ -107,7 +131,7 @@ class ProgressTracker:
         :returns: Counts, total speed and estimated time left
         """
         with self._lock:
-            entries = list(self._entries.values())
+            entries = [entry for entry in self._entries.values() if entry.is_followed]
             finished_count = sum(entry.status in FINISHED_STATUSES for entry in entries)
             worked_count = sum(entry.status in (STATUS_DOWNLOADED, STATUS_FAILED) for entry in entries)
             remaining_count = len(entries) - finished_count
@@ -271,6 +295,7 @@ class TrackProgress:
     :param saved_path: Path the file was saved to, empty until the track is downloaded
     :param relaxed_query: Simpler spelling the track is or was last searched under, empty for the exact search
     :param sources: Soulseek users a transfer of this track was started from, in the order they were tried
+    :param is_followed: Whether the track is part of the run being followed
     :param progress_at: Time of the latest transfer progress event
     """
 
@@ -283,6 +308,7 @@ class TrackProgress:
     saved_path: str = ""
     relaxed_query: str = ""
     sources: tuple[str, ...] = ()
+    is_followed: bool = True
     progress_at: datetime | None = field(default=None, repr=False)
 
     @property
@@ -313,7 +339,7 @@ class ProgressSummary:
     """
     Progress of a whole download run.
 
-    :param total_count: Number of requested tracks
+    :param total_count: Number of followed tracks
     :param downloaded_count: Tracks downloaded during this run
     :param already_downloaded_count: Tracks skipped because the download history holds them
     :param failed_count: Tracks that were not found or could not be downloaded

@@ -4,7 +4,8 @@ A window for managing DJ music. It reads track lists from Spotify, YouTube and S
 and batch-downloads the tracks from Soulseek as MP3 files, straight onto the USB key, each download in a folder
 named after its playlist.
 
-- For everyone: [Installing](#installing), [Using it](#using-it), [When a track is not found](#when-a-track-is-not-found),
+- For everyone: [Installing](#installing), [Using it](#using-it),
+  [Acting on single tracks](#acting-on-single-tracks), [When a track is not found](#when-a-track-is-not-found),
   [When something goes wrong](#when-something-goes-wrong), [Where things are kept](#where-things-are-kept),
   [VPN](#vpn)
 - For developers: [How the websites are read](#how-the-websites-are-read),
@@ -54,7 +55,9 @@ To update, install the new version over the old one. Settings and download histo
 4. **Stop** ends the download early; the VPN is disconnected as usual and a later Download resumes.
    Click a column heading (Artist, Title, Status...) to sort the table by it, and click again for the reverse
    order; an arrow in the heading shows the direction, and `#` gives the order of the playlist back.
-5. **Settings...** edits everything: Soulseek account, download folder, preferred quality, VPN, conversion.
+5. **Right-click a track** to download only that one, again or from someone else (see
+   [Acting on single tracks](#acting-on-single-tracks)).
+6. **Settings...** edits everything: Soulseek account, download folder, preferred quality, VPN, conversion.
 
 What a download does, in order:
 
@@ -105,6 +108,30 @@ Good to know:
   deleted is downloaded again, and so are the tracks that failed.
 - Soulseek limits searches to about 34 every 220 seconds, so a 200 track playlist takes at least 20 minutes.
 
+## Acting on single tracks
+
+Select one or more tracks (Ctrl or Shift click for several, Ctrl+A for all) and right-click them:
+
+| Menu entry | What it does |
+| --- | --- |
+| **Download** / **Download again** | Downloads only the selected tracks, without running the whole list again. A track that was tried before is asked first from the person it came from last time. |
+| **Download from another source** | Downloads the selected tracks from other people than the ones already tried for them: the next best source. Use it when a file is a bad rip or the wrong version, or when its source never answers. Only available once Tandem DJ knows who was tried, which it remembers from one launch to the next. With several tracks selected, the people tried for any of them are avoided for all of them. |
+| **Leave this source now** | During a download, for a track stuck at 0 kB/s: gives up the person it is being transferred from, for every track. sockseek cannot change source while it runs, so it is restarted on the tracks that are not downloaded yet; the other transfers in progress start over, finished tracks are kept. |
+| **Show the file in its folder** | Opens the folder of the track with its file selected. |
+| **Copy artist and title** | Copies the selected tracks as `Artist - Title` lines. |
+| **Select every track that is not downloaded** | Selects what failed or was not finished, ready for one of the entries above. |
+
+- These work during a download as well: the request is queued and done by the same download once it is through
+  with its list, so the VPN stays connected and no second warning is shown. Tracks the download is still working
+  on cannot be asked again until it is done with them.
+- When nothing is running, the request starts a download of its own, with the VPN and the warning as usual.
+- **A track that already has a file** is downloaded again only after you confirm. The file you have is deleted
+  once another one was downloaded, never before: when nothing else is found, the track keeps its file and the
+  `Details` column says so.
+- The files go into the folder of the last download of the list shown in the table.
+- A transfer stuck at 0 kB/s also resolves by itself: sockseek drops a source that sends nothing for 30 seconds
+  and tries the next one (see **Drop a silent source after** in the settings).
+
 ## When a track is not found
 
 A Soulseek search only returns files whose path holds every searched word, spelled the same way. A file named
@@ -149,7 +176,9 @@ Common situations:
 | A track is downloaded again although you already have it | Its file is no longer where Tandem DJ saved it (moved, renamed or deleted), so it counts as missing. |
 | Every track fails at once | The Soulseek user name or password is wrong, or the same account is logged in elsewhere (a second login kicks the first). |
 | A link gives an error but worked before | The website changed. Install a newer Tandem DJ; meanwhile, paste the tracks as `Artist - Title` lines. |
-| Tracks marked "Not finished" | The download was stopped or the VPN dropped: click **Download** again, finished tracks are skipped. |
+| Tracks marked "Not finished" | The download was stopped or the VPN dropped: click **Download** again, finished tracks are skipped. Or right-click the tracks you want. |
+| A transfer stays at 0 kB/s | The person sharing the file is not sending. It is dropped after 30 seconds by itself; to go faster, right-click the track and choose **Leave this source now**, or lower **Drop a silent source after** in the settings. |
+| A downloaded file is bad or the wrong version | Right-click the track and choose **Download from another source**. |
 
 What the `Details` column says about a track marked `Failed`:
 
@@ -157,7 +186,7 @@ What the `Details` column says about a track marked `Failed`:
 | --- | --- |
 | `not found: nobody on Soulseek shares a file matching this search` | The search returned nothing at all, even under the simpler spellings. |
 | `not found: 42 files came up but none fits (wrong length or format...)` | Files were found, but none is an audio file within 3 seconds of the expected length, or their owners keep them private. Often another version of the track. |
-| `found, but none of the 3 sources tried sent the file (...)` | The track exists and was found. sockseek asked each person sharing it in turn (up to 10), and each one refused, went offline or stayed silent, so nothing was received. The names in brackets are the people it asked. Trying again later often works: they may simply be offline or busy. |
+| `found, but none of the 3 sources tried sent the file (...)` | The track exists and was found. sockseek asked each person sharing it in turn (up to 10), and each one refused, went offline or stayed silent, so nothing was received. The names in brackets are the people it asked. Right-click the track and choose **Download again** later (they may simply be offline or busy) or **Download from another source**. |
 
 ## Where things are kept
 
@@ -172,6 +201,8 @@ Everything the application writes lives in one folder per user:
 - `config.toml`: the settings, written by the **Settings...** button. It holds the Soulseek password.
 - `data/sockseek_index.csv`: the download history, which records where each track was saved. It is only believed
   while the file is still there, so there is nothing to edit in it.
+- `data/tried_sources.json`: the people each track was downloaded or tried from, which is what **Download from
+  another source** avoids.
 - `data/inputs/`: the track lists handed to sockseek, one file per playlist.
 - `logs/`: the log files of the last 20 launches.
 

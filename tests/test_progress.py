@@ -276,6 +276,41 @@ def test_a_track_listed_as_pending_again_goes_back_to_waiting():
     assert darude.sources == ("peer",)
 
 
+def test_only_the_tracks_that_are_expected_are_followed():
+    """
+    A tracker made for part of a list only shows and counts the tracks it was told to expect. A track expected
+    again waits, without what happened to it before, but keeps the users it was tried from.
+    """
+    tracker = ProgressTracker([AVERY, DARUDE, MISSING], followed=False)
+    assert tracker.snapshot() == []
+    assert tracker.summary().total_count == 0
+
+    tracker.expect([DARUDE])
+    tracker.handle_line(
+        event("download_start", 12.0, artist="Darude", title="Feel the Beat", username="peer", size=10_000_000)
+    )
+    tracker.handle_line(
+        event(
+            "track_state",
+            13.0,
+            artist="Darude",
+            title="Feel the Beat",
+            lifecycleState="Terminal",
+            terminalOutcome="Failed",
+            failureReason="AllDownloadsFailed",
+        )
+    )
+    assert [(entry.track, entry.status) for entry in tracker.snapshot()] == [(DARUDE, STATUS_FAILED)]
+    assert (tracker.summary().total_count, tracker.summary().failed_count) == (1, 1)
+
+    tracker.expect([DARUDE, AVERY, SKIPPED], "queued: download again")
+    avery, darude = tracker.snapshot()
+    assert (avery.track, avery.status, avery.detail) == (AVERY, STATUS_WAITING, "queued: download again")
+    assert (darude.status, darude.detail, darude.percent) == (STATUS_WAITING, "queued: download again", None)
+    assert darude.sources == ("peer",)
+    assert tracker.summary().failed_count == 0
+
+
 def test_summary_counts_and_estimates_time_left():
     """
     The summary counts outcomes and extrapolates the time left from the tracks worked on so far.

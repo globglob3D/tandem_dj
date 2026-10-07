@@ -181,6 +181,25 @@ def style_text_box(text_box: tkinter.Text) -> None:
     )
 
 
+def style_menu(menu: tkinter.Menu) -> None:
+    """
+    Give a popup menu the dark terminal look, where the operating system lets menus be coloured.
+
+    :param menu: Menu to style
+    """
+    menu.configure(
+        background=SURFACE_RAISED,
+        foreground=TEXT,
+        activebackground=SELECTION,
+        activeforeground=TEXT_BRIGHT,
+        disabledforeground=TEXT_DIM,
+        relief="flat",
+        borderwidth=1,
+        activeborderwidth=0,
+        font=FONT,
+    )
+
+
 def darken_title_bar(window: tkinter.Misc) -> None:
     """
     Ask Windows to draw the title bar of a window in dark mode. Does nothing on other systems.
