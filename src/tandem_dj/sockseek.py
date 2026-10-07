@@ -12,7 +12,7 @@ import re
 import shutil
 import subprocess
 import threading
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO
@@ -38,7 +38,9 @@ INDEX_STATE_FAILED = "2"
 INDEX_STATE_ALREADY_DOWNLOADED = "3"
 PASSWORD_PLACEHOLDER = "********"
 WATCH_INTERVAL_SECONDS = 5
+INTERRUPTION_CHECK_SECONDS = 0.5
 MILLISECONDS_PER_SECOND = 1000
+SOURCE_SEPARATOR = ","
 
 
 class SockseekDownloader:
@@ -48,11 +50,18 @@ class SockseekDownloader:
     :param settings: User settings holding the Soulseek account, folders and preferences
     :param batch_directory: Folder the files of this batch are saved in, normally a new folder inside the download
         folder; it is created for each sockseek run and deleted again when nothing was saved in it
+    :ivar preferred_sources: Soulseek users whose files are picked first by the runs to come
+    :ivar avoided_sources: Soulseek users whose files the runs to come do not consider
     """
 
     def __init__(self, settings: Settings, batch_directory: Path) -> None:
         self.settings = settings
         self.batch_directory = batch_directory
+        self.preferred_sources: tuple[str, ...] = ()
+        self.avoided_sources: tuple[str, ...] = ()
+        self._skipped_sources: list[str] = []
+        self._restart_requested = threading.Event()
+        self._lock = threading.Lock()
 
     def download(
         self,
@@ -69,7 +78,8 @@ class SockseekDownloader:
 
         Before the run, leftovers of interrupted runs and downloads whose file is gone are removed from the index;
         after it, the partial files sockseek leaves in its staging folder inside the folder of the batch are
-        deleted, and so is that folder when nothing was saved in it.
+        deleted, and so is that folder when nothing was saved in it. Sockseek is started again, on the tracks it
+        has not downloaded yet, whenever :meth:`skip_source` is called meanwhile.
 
         :param tracks: Tracks to download; duplicates are only requested once
         :param name: Name of the batch, used to name the generated sockseek input file
@@ -79,15 +89,17 @@ class SockseekDownloader:
         :raises DownloadError: If sockseek, the download folder or the folder of the batch is not available
         """
         self.check_ready()
-        self._create_batch_directory()
         requested_tracks = remove_duplicates(tracks)
-        input_path = self.input_path_for(name)
-        write_input_file(requested_tracks, input_path)
         repair_index(self.settings.index_path)
         previously_downloaded = find_already_downloaded(requested_tracks, self.settings.index_path)
-        command = self.build_command(input_path, requested_tracks, emit_progress_events=on_output_line is not None)
-        exit_code, stopped_early = run_while(command, keep_running, on_output_line=on_output_line)
-        self._tidy_batch_directory()
+        exit_code, stopped_early = self._run(
+            [input_row(track) for track in requested_tracks],
+            self.input_path_for(name),
+            self.settings.index_path,
+            keep_running,
+            on_output_line,
+            requested_tracks,
+        )
         report = build_report(requested_tracks, self.settings.index_path, exit_code, previously_downloaded)
         report.stopped_early = stopped_early
         return report
@@ -114,7 +126,6 @@ class SockseekDownloader:
         :raises DownloadError: If sockseek, the download folder or the folder of the batch is not available
         """
         self.check_ready()
-        self._create_batch_directory()
         input_path = self.input_path_for(f"{name} {RELAXED_INPUT_SUFFIX}")
         variant_index_path = input_path.with_suffix(RELAXED_INDEX_SUFFIX)
         variant_index_path.unlink(missing_ok=True)
@@ -122,12 +133,7 @@ class SockseekDownloader:
             {"Artist": variant.artist, "Title": variant.title, "Album": "", "Length": str(track.duration_seconds or "")}
             for track, variant in variants.items()
         ]
-        write_input_rows(rows, input_path)
-        command = self.build_command(
-            input_path, emit_progress_events=on_output_line is not None, index_path=variant_index_path
-        )
-        _, stopped_early = run_while(command, keep_running, on_output_line=on_output_line)
-        self._tidy_batch_directory()
+        _, stopped_early = self._run(rows, input_path, variant_index_path, keep_running, on_output_line)
         entries = read_index(variant_index_path)
         saved_files = {
             track: entry.file_path
@@ -137,6 +143,31 @@ class SockseekDownloader:
         record_downloads(self.settings.index_path, saved_files)
         variant_index_path.unlink(missing_ok=True)
         return saved_files, stopped_early
+
+    def skip_source(self, username: str) -> None:
+        """
+        Stop downloading from a Soulseek user, for the rest of the life of this downloader.
+
+        A sockseek run in progress is stopped and started again without that user, on the tracks it has not
+        downloaded yet: sockseek cannot be told to leave one source while it runs, so the other transfers in
+        progress start over as well. Safe to call from another thread than the one downloading.
+
+        :param username: Soulseek user to leave out
+        """
+        with self._lock:
+            if username and username not in self._skipped_sources:
+                self._skipped_sources.append(username)
+        self._restart_requested.set()
+
+    @property
+    def skipped_sources(self) -> tuple[str, ...]:
+        """
+        List the users :meth:`skip_source` was called for.
+
+        :returns: Soulseek user names, in the order they were skipped
+        """
+        with self._lock:
+            return tuple(self._skipped_sources)
 
     def check_ready(self) -> None:
         """
@@ -203,6 +234,12 @@ class SockseekDownloader:
         ]
         if settings.preferred_formats:
             command += ["--pref-format", ",".join(settings.preferred_formats)]
+        avoided_sources = _source_list((*self.avoided_sources, *self.skipped_sources))
+        preferred_sources = _source_list(self.preferred_sources, excluded=avoided_sources)
+        if avoided_sources:
+            command += ["--banned-users", SOURCE_SEPARATOR.join(avoided_sources)]
+        if preferred_sources:
+            command += ["--pref-allowed-users", SOURCE_SEPARATOR.join(preferred_sources)]
         if any(track.artist_is_uncertain for track in tracks):
             command.append("--artist-maybe-wrong")
         if emit_progress_events:
@@ -220,6 +257,54 @@ class SockseekDownloader:
         command = self.build_command(input_path, tracks)
         command[command.index("--pass") + 1] = PASSWORD_PLACEHOLDER
         return subprocess.list2cmdline(command)
+
+    def _run(
+        self,
+        rows: Sequence[Mapping[str, str]],
+        input_path: Path,
+        index_path: Path,
+        keep_running: Callable[[], bool] | None,
+        on_output_line: Callable[[str], None] | None,
+        tracks: Sequence[Track] = (),
+    ) -> tuple[int, bool]:
+        """
+        Run sockseek on search rows, again each time a source is skipped meanwhile.
+
+        A run interrupted by :meth:`skip_source` is followed by another one on the rows the index does not hold as
+        downloaded, which no longer considers the skipped user.
+
+        :param rows: Values keyed by the column names of the sockseek input file
+        :param input_path: Input file to write the rows to
+        :param index_path: Index file sockseek reads and writes
+        :param keep_running: Condition checked every few seconds; sockseek is stopped once it returns ``False``
+        :param on_output_line: Receiver of every line sockseek prints
+        :param tracks: Tracks behind the rows; an unsure artist among them makes sockseek also search by title
+        :returns: ``(exit_code, stopped_early)`` of the last run; ``stopped_early`` only tells about ``keep_running``
+        """
+        pending_rows = list(rows)
+        while True:
+            self._restart_requested.clear()
+            self._create_batch_directory()
+            write_input_rows(pending_rows, input_path)
+            command = self.build_command(
+                input_path, tracks, emit_progress_events=on_output_line is not None, index_path=index_path
+            )
+            exit_code, stopped_early = run_while(
+                command, keep_running, on_output_line=on_output_line, interrupted=self._restart_requested.is_set
+            )
+            self._tidy_batch_directory()
+            was_restarted = stopped_early and self._restart_requested.is_set()
+            if not was_restarted or (keep_running is not None and not keep_running()):
+                return exit_code, stopped_early
+            repair_index(index_path)
+            entries = read_index(index_path)
+            pending_rows = [
+                row
+                for row in pending_rows
+                if (entry := entries.get(track_key(row["Artist"], row["Title"]))) is None or not entry.is_downloaded
+            ]
+            if not pending_rows:
+                return exit_code, False
 
     def _create_batch_directory(self) -> None:
         """
@@ -311,16 +396,18 @@ def run_while(
     keep_running: Callable[[], bool] | None,
     watch_interval_seconds: float = WATCH_INTERVAL_SECONDS,
     on_output_line: Callable[[str], None] | None = None,
+    interrupted: Callable[[], bool] | None = None,
 ) -> tuple[int, bool]:
     """
-    Run a program, stopping it as soon as a condition stops holding.
+    Run a program, stopping it as soon as a condition stops holding or an interruption is asked for.
 
     :param command: Program path followed by its arguments
     :param keep_running: Condition checked at every interval; ``None`` lets the program run to its end
     :param watch_interval_seconds: Time between two checks of the condition
     :param on_output_line: Receiver of every line the program prints, called from a background thread; without it
         the program writes to the standard output of the application
-    :returns: ``(exit_code, stopped_early)``; ``stopped_early`` is ``True`` when the condition ended the program
+    :param interrupted: Cheap check made twice a second; the program is stopped as soon as it returns ``True``
+    :returns: ``(exit_code, stopped_early)``; ``stopped_early`` is ``True`` when the program was stopped
     """
     if on_output_line is None:
         process = subprocess.Popen(command)
@@ -339,7 +426,7 @@ def run_while(
         reader = threading.Thread(target=_forward_lines, args=(process.stdout, on_output_line), daemon=True)
         reader.start()
     try:
-        return _wait_while(process, keep_running, watch_interval_seconds)
+        return _wait_while(process, keep_running, watch_interval_seconds, interrupted)
     finally:
         if reader is not None:
             reader.join(timeout=watch_interval_seconds)
@@ -357,21 +444,35 @@ def _forward_lines(stream: IO[str], on_output_line: Callable[[str], None]) -> No
 
 
 def _wait_while(
-    process: subprocess.Popen, keep_running: Callable[[], bool] | None, watch_interval_seconds: float
+    process: subprocess.Popen,
+    keep_running: Callable[[], bool] | None,
+    watch_interval_seconds: float,
+    interrupted: Callable[[], bool] | None = None,
 ) -> tuple[int, bool]:
     """
-    Wait for a running program, stopping it as soon as a condition stops holding.
+    Wait for a running program, stopping it as soon as a condition stops holding or an interruption is asked for.
 
     :param process: The running program
     :param keep_running: Condition checked at every interval; ``None`` lets the program run to its end
     :param watch_interval_seconds: Time between two checks of the condition
+    :param interrupted: Cheap check made twice a second; the program is stopped as soon as it returns ``True``
     :returns: ``(exit_code, stopped_early)``
     """
+    wait_seconds = watch_interval_seconds
+    if interrupted is not None:
+        wait_seconds = min(watch_interval_seconds, INTERRUPTION_CHECK_SECONDS)
+    waits_per_check = max(1, round(watch_interval_seconds / wait_seconds))
+    waits_since_check = 0
     while True:
         try:
-            return process.wait(timeout=watch_interval_seconds), False
+            return process.wait(timeout=wait_seconds), False
         except subprocess.TimeoutExpired:
-            if keep_running is not None and not keep_running():
+            waits_since_check += 1
+            must_stop = interrupted is not None and interrupted()
+            if not must_stop and waits_since_check >= waits_per_check:
+                waits_since_check = 0
+                must_stop = keep_running is not None and not keep_running()
+            if must_stop:
                 process.kill()
                 return process.wait(), True
 
@@ -614,6 +715,21 @@ def _read_index_row(row: Mapping[str, str]) -> IndexEntry | None:
         return entry
     saved_file = _locate_saved_file(entry.file_path)
     return IndexEntry(state=entry.state, file_path=saved_file) if saved_file else None
+
+
+def _source_list(usernames: Iterable[str], excluded: Collection[str] = ()) -> list[str]:
+    """
+    Prepare Soulseek user names for a sockseek option taking several of them.
+
+    :param usernames: User names, possibly repeated or empty
+    :param excluded: User names to leave out
+    :returns: Each name once, in order, without those sockseek could not tell apart from two names
+    """
+    return [
+        username
+        for username in dict.fromkeys(usernames)
+        if username and SOURCE_SEPARATOR not in username and username not in excluded
+    ]
 
 
 def _file_name_from(name: str) -> str:

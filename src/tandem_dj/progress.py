@@ -146,7 +146,10 @@ class ProgressTracker:
         event_type = event["type"]
         if event_type == "track_list":
             for description in data.get("tracks") or []:
-                self._apply_state(self._find(description), description)
+                entry = self._find(description)
+                if entry is not None and description.get("lifecycleState") == "Pending":
+                    self._wait_again(entry)
+                self._apply_state(entry, description)
         elif event_type == "track_state":
             self._apply_state(self._find(data), data)
         elif event_type == "search_start":
@@ -166,6 +169,19 @@ class ProgressTracker:
                 entry.bytes_transferred, entry.speed_bytes_per_second, entry.progress_at = 0, 0.0, None
         elif event_type == "download_progress":
             self._apply_download_progress(data, event_time)
+
+    @staticmethod
+    def _wait_again(entry: "TrackProgress") -> None:
+        """
+        Put back to waiting a track that sockseek is about to work on, as when it is started again.
+
+        :param entry: Entry of a track sockseek lists as pending
+        """
+        if entry.status == STATUS_WAITING:
+            return
+        entry.status, entry.detail = STATUS_WAITING, "starting again"
+        entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
+        entry.progress_at = None
 
     def _apply_state(self, entry: "TrackProgress | None", description: dict) -> None:
         """

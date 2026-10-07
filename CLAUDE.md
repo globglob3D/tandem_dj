@@ -263,6 +263,19 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
 - **A transfer stuck at 0 kB/s is sockseek waiting for a silent source.** It drops a source after
   `--max-stale-time` without a state change or a byte received, then tries the next candidate. That time is
   `Settings.silent_source_seconds` (30 by default, never under 5), editable in the settings window.
+- **Sockseek cannot be told anything while it runs** under another program: its keyboard shortcuts (`t`, try the
+  next candidate) are switched off when its input is not a console, and its HTTP interface (`sockseek daemon`) is
+  marked experimental by its author. So leaving a source during a download is done by restarting sockseek:
+  `SockseekDownloader.skip_source(username)` adds the user to `--banned-users` and interrupts the run, and
+  `_run()` starts sockseek again on the rows the index does not hold as downloaded. The other transfers in
+  progress start over; that cost is why the window says so in the menu entry. `run_while()` checks the cheap
+  `interrupted` callback twice a second, and `keep_running` (which may run `piactl`) every 5 seconds as before.
+- **Sources to prefer or avoid** are `SockseekDownloader.preferred_sources` and `avoided_sources`, passed as
+  `--pref-allowed-users` and `--banned-users` to every run of that downloader until they are changed. Measured in
+  mock mode, where every file belongs to the user `local`: banning `local` makes every search fail with
+  `NoSearchResults`, which is how the tests see that a source is really left out.
+- **A new sockseek run prints a `track_list` event** naming its tracks as `Pending`; the tracker puts those back to
+  waiting, which is what clears the progress of transfers cut by a restart.
 - **Only the first artist is written to the sockseek input**, because a Soulseek search needs every word to match a
   file path. `Track.artists` keeps them all.
 - **sockseek exits with code 1 when some tracks fail**; that is a normal partial result, not a crash.

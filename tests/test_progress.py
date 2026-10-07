@@ -246,6 +246,36 @@ def test_failures_are_explained_in_plain_words():
     assert describe_failure("SomethingNewHappened") == "something new happened"
 
 
+def test_a_track_listed_as_pending_again_goes_back_to_waiting():
+    """
+    When sockseek is started again during a download, the tracks it lists as pending wait again, without the
+    progress of the transfer that was cut; a downloaded track stays downloaded.
+    """
+    tracker = make_tracker()
+    tracker.handle_line(
+        event("download_start", 12.0, artist="Darude", title="Feel the Beat", username="peer", size=10_000_000)
+    )
+    tracker.handle_line(
+        event("download_progress", 13.0, jobId="job", bytesTransferred=4_000_000, totalBytes=10_000_000)
+    )
+    tracker.handle_line(
+        event(
+            "track_state",
+            14.0,
+            artist="Daniel Avery",
+            title="Naive Response",
+            lifecycleState="Terminal",
+            terminalOutcome="Succeeded",
+        )
+    )
+    pending = {"lifecycleState": "Pending", "terminalOutcome": "None"}
+    tracker.handle_line(event("track_list", 20.0, tracks=[{"artist": "Darude", "title": "Feel the Beat", **pending}]))
+    avery, darude, *_ = tracker.snapshot()
+    assert avery.status == STATUS_DOWNLOADED
+    assert (darude.status, darude.detail, darude.percent) == (STATUS_WAITING, "starting again", None)
+    assert darude.sources == ("peer",)
+
+
 def test_summary_counts_and_estimates_time_left():
     """
     The summary counts outcomes and extrapolates the time left from the tracks worked on so far.

@@ -3,6 +3,7 @@ Tests of the sockseek downloader, including an offline run of the real program a
 """
 
 import csv
+import json
 import sys
 import time
 from pathlib import Path
@@ -96,6 +97,25 @@ def test_build_command_passes_account_folders_and_preferences(tmp_path):
         assert command[command.index(flag) + 1] == value
     assert "--artist-maybe-wrong" in command
     assert command[-1] == "--fast-search"
+
+
+def test_build_command_names_the_sources_to_prefer_and_to_avoid(tmp_path):
+    """
+    Sockseek is told which users to pick first and which to leave out, a skipped user being left out as well. A
+    user to avoid is never preferred, and a name sockseek would read as two names is not passed.
+    """
+    downloader = make_downloader(make_settings(tmp_path))
+    command = downloader.build_command(tmp_path / "input.csv")
+    assert "--banned-users" not in command and "--pref-allowed-users" not in command
+
+    downloader.preferred_sources = ("good peer", "slow peer")
+    downloader.avoided_sources = ("slow peer", "odd, name", "")
+    downloader.skip_source("dead peer")
+    downloader.skip_source("dead peer")
+    command = downloader.build_command(tmp_path / "input.csv")
+    assert command[command.index("--banned-users") + 1] == "slow peer,dead peer"
+    assert command[command.index("--pref-allowed-users") + 1] == "good peer"
+    assert downloader.skipped_sources == ("dead peer",)
 
 
 def test_describe_command_hides_the_password(tmp_path):
@@ -216,6 +236,23 @@ def test_run_while_stops_the_program_when_the_condition_fails():
     assert time.monotonic() - started < 30
 
 
+def test_run_while_stops_the_program_as_soon_as_it_is_interrupted():
+    """
+    An interruption stops the program without waiting for the next check of the condition to keep running.
+    """
+    started = time.monotonic()
+    command = [sys.executable, "-c", "import time; time.sleep(60)"]
+    exit_code, stopped_early = run_while(
+        command,
+        keep_running=lambda: True,
+        watch_interval_seconds=45,
+        interrupted=lambda: time.monotonic() - started > 1,
+    )
+    assert stopped_early
+    assert exit_code != 0
+    assert time.monotonic() - started < 30
+
+
 def test_run_while_lets_the_program_finish():
     """
     A program that ends by itself reports its own exit code.
@@ -270,6 +307,46 @@ def test_download_with_real_sockseek_against_local_files(tmp_path):
     assert third_report.downloaded == [found]
     assert third_report.already_downloaded == []
     assert saved_file.is_file()
+
+
+@pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file(), reason="sockseek is not installed in vendor/sockseek")
+def test_skipping_a_source_starts_sockseek_again_without_it(tmp_path):
+    """
+    Skipping a source while sockseek downloads from it stops sockseek and starts it again on the tracks that are
+    not downloaded yet, with that source left out. The run still counts as complete.
+    """
+    shared_files = tmp_path / "shared"
+    shared_files.mkdir()
+    shared_tracks = [Track(artists=("Slow Artist",), title=f"Long Song {number}") for number in range(1, 7)]
+    for track in shared_tracks:
+        (shared_files / f"{track.display_name}.mp3").write_bytes(b"not really audio")
+    settings = make_settings(
+        tmp_path,
+        extra_arguments=("--mock-files-dir", str(shared_files), "--mock-files-no-read-tags", "--mock-files-slow"),
+    )
+    downloader = make_downloader(settings)
+    lines: list[str] = []
+
+    def skip_at_the_first_transfer(line: str) -> None:
+        """
+        Keep the line, and skip the only source there is once a transfer from it starts.
+
+        :param line: Line printed by sockseek
+        """
+        lines.append(line)
+        if '"download_start"' in line and not downloader.skipped_sources:
+            downloader.skip_source("local")
+
+    report = downloader.download(shared_tracks, "skipped source", on_output_line=skip_at_the_first_transfer)
+
+    assert downloader.skipped_sources == ("local",)
+    assert not report.stopped_early
+    assert len(report.downloaded) < len(shared_tracks)
+    assert report.downloaded + report.failed == shared_tracks
+    track_lists = [json.loads(line)["data"] for line in lines if line.startswith('{"type":"track_list"')]
+    assert [track_list["total"] for track_list in track_lists] == [6, 6 - len(report.downloaded)]
+    command = downloader.build_command(downloader.input_path_for("skipped source"))
+    assert command[command.index("--banned-users") + 1] == "local"
 
 
 def test_repair_index_keeps_the_most_conclusive_row_per_track(tmp_path):
