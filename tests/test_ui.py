@@ -66,26 +66,66 @@ def cells(window: MainWindow, row_number: int) -> dict[str, str]:
 
 def test_read_tracks_are_listed_as_sent_to_sockseek(window):
     """
-    The table shows the main artist and title sent to sockseek, with the other artists as a note.
+    The table shows the main artist and title sent to sockseek, with the other artists as a note. A track that is
+    already downloaded names its file and the folder holding it.
     """
     collection = TrackCollection(name="Son 2 Teuf", origin="spotify", tracks=[SKONE, DARUDE])
-    window._show_tracks(collection, [SKONE, DARUDE], duplicate_count=1, already_downloaded=[DARUDE])
+    existing_file = "D:/music/Old list - spotify - 2026-10-01 20-00-00/Darude - Feel The Beat.mp3"
+    window._show_tracks(collection, [SKONE, DARUDE], duplicate_count=1, already_downloaded={DARUDE: existing_file})
     first_row, second_row = cells(window, 0), cells(window, 1)
     assert (first_row["artist"], first_row["title"], first_row["length"]) == ("Sköne", "Afterlife", "4:00")
     assert first_row["notes"] == "also credited: Otah"
     assert (first_row["status"], second_row["status"]) == (STATUS_WAITING, STATUS_ALREADY_DOWNLOADED)
+    assert (first_row["detail"], second_row["detail"]) == (
+        "",
+        "already have Darude - Feel The Beat.mp3, in Old list - spotify - 2026-10-01 20-00-00",
+    )
     assert "2 tracks to send to sockseek, 1 duplicates left out, 1 already downloaded" in window.source_label.cget(
         "text"
     )
 
 
+def test_reading_marks_a_track_as_already_downloaded_only_while_its_file_is_there(window, tmp_path):
+    """
+    A track the download history holds is marked as already downloaded when its file exists, and waits for a
+    download like any other once the file is deleted.
+    """
+    kept_file = tmp_path / "Old list" / "Darude - Feel the Beat.mp3"
+    kept_file.parent.mkdir()
+    kept_file.write_bytes(b"not really audio")
+    index_path = window.settings.index_path
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.write_text(
+        "filepath,artist,album,title,length,tracktype,state,failurereason\n"
+        f"{kept_file.as_posix()},Darude,,Feel the Beat,-1,0,1,0\n"
+        f"{(tmp_path / 'Old list' / 'gone.mp3').as_posix()},Sköne,,Afterlife,-1,0,1,0\n",
+        encoding="utf-8",
+    )
+    try:
+        window._read("Darude - Feel the Beat\nSköne - Afterlife", window.settings)
+        window._refresh()
+        assert (cells(window, 0)["status"], cells(window, 1)["status"]) == (STATUS_ALREADY_DOWNLOADED, STATUS_WAITING)
+        assert cells(window, 0)["detail"] == "already have Darude - Feel the Beat.mp3, in Old list"
+        assert "2 tracks to send to sockseek, 0 duplicates left out, 1 already downloaded" in window.source_label.cget(
+            "text"
+        )
+
+        kept_file.unlink()
+        window._read("Darude - Feel the Beat\nSköne - Afterlife", window.settings)
+        window._refresh()
+        assert (cells(window, 0)["status"], cells(window, 0)["detail"]) == (STATUS_WAITING, "")
+        assert "0 already downloaded" in window.source_label.cget("text")
+    finally:
+        index_path.unlink()
+
+
 def test_live_progress_and_final_report_reach_the_table(window, tmp_path):
     """
     A running transfer shows its bar, size, speed and time left; the report then shows the saved file and the
-    folder of the download.
+    folder of the download. A track skipped by a later download names the file that is already there.
     """
     collection = TrackCollection(name="Son 2 Teuf", origin="spotify", tracks=[SKONE, DARUDE])
-    window._show_tracks(collection, [SKONE, DARUDE], duplicate_count=0, already_downloaded=[])
+    window._show_tracks(collection, [SKONE, DARUDE], duplicate_count=0, already_downloaded={})
     tracker = ProgressTracker([SKONE, DARUDE])
     window.tracker = tracker
     for second, event_type, data in [
@@ -121,6 +161,13 @@ def test_live_progress_and_final_report_reach_the_table(window, tmp_path):
     assert "1 downloaded" in window.summary_label.cget("text")
     window._refresh()
     assert f"The files of this download are in {tmp_path}" in window.log_box.get("1.0", "end")
+
+    later_report = DownloadReport(
+        already_downloaded=[DARUDE], saved_files={DARUDE: "D:/music/Old list/Darude - Feel The Beat.mp3"}
+    )
+    window._show_report(later_report, tmp_path)
+    assert cells(window, 1)["status"] == STATUS_ALREADY_DOWNLOADED
+    assert cells(window, 1)["detail"] == "already have Darude - Feel The Beat.mp3, in Old list"
 
 
 def test_download_is_given_a_new_folder_named_after_the_playlist(window, monkeypatch, tmp_path):
@@ -161,7 +208,7 @@ def test_track_found_under_a_simpler_spelling_is_flagged_for_a_check(window, tmp
     A relaxed match stands out in the table and names the search that found it.
     """
     collection = TrackCollection(name="Son 2 Teuf", origin="spotify", tracks=[SKONE, DARUDE])
-    window._show_tracks(collection, [SKONE, DARUDE], duplicate_count=0, already_downloaded=[])
+    window._show_tracks(collection, [SKONE, DARUDE], duplicate_count=0, already_downloaded={})
     window.tracker = None
     report = DownloadReport(
         downloaded=[DARUDE, SKONE],

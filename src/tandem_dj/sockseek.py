@@ -12,7 +12,7 @@ import re
 import shutil
 import subprocess
 import threading
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO
@@ -433,7 +433,7 @@ def write_input_rows(rows: Sequence[Mapping[str, str]], path: Path) -> None:
 
 
 def build_report(
-    tracks: Sequence[Track], index_path: Path, exit_code: int, previously_downloaded: Sequence[Track] = ()
+    tracks: Sequence[Track], index_path: Path, exit_code: int, previously_downloaded: Collection[Track] = ()
 ) -> DownloadReport:
     """
     Look up the outcome of each requested track in the sockseek index.
@@ -460,20 +460,20 @@ def build_report(
     return report
 
 
-def find_already_downloaded(tracks: Sequence[Track], index_path: Path) -> list[Track]:
+def find_already_downloaded(tracks: Sequence[Track], index_path: Path) -> dict[Track, str]:
     """
     Pick the tracks an earlier run downloaded and whose file is still there, which sockseek will skip.
 
     :param tracks: Tracks about to be requested
     :param index_path: Index file written by sockseek
-    :returns: The tracks that need no download
+    :returns: The file of each track that needs no download, in the order of the tracks
     """
     entries = read_index(index_path)
-    return [
-        track
+    return {
+        track: entry.file_path
         for track in tracks
         if (entry := entries.get(track_key(track.primary_artist, track.title))) is not None and entry.is_downloaded
-    ]
+    }
 
 
 def read_index(index_path: Path) -> dict[tuple[str, str], IndexEntry]:

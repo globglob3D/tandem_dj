@@ -252,6 +252,8 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
   whose file is gone, and `repair_index()` deletes such rows before every sockseek run, so a moved, renamed or
   deleted file is downloaded again. The index is kept as the link between a requested track and its file, because
   file names come from tags or from the Soulseek uploader and cannot be matched to the playlist reliably.
+  `find_already_downloaded()` returns the file of each such track; the window shows it in the `Details` column
+  (`already have <file>, in <folder>`) and writes the full paths to the log file.
 - **Only the first artist is written to the sockseek input**, because a Soulseek search needs every word to match a
   file path. `Track.artists` keeps them all.
 - **sockseek exits with code 1 when some tracks fail**; that is a normal partial result, not a crash.
@@ -304,7 +306,7 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
 First released as 0.2.0; 0.3.0 added one folder per download. Left in a finished state on 2026-10-07. What is
 known to work and what is not:
 
-- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (191
+- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (192
   tests, none skipped, including the offline runs of the real sockseek and the hidden-window tests), the build, and
   the smoke test showing that the packaged application starts and that the sockseek and ffmpeg packed inside answer.
 - **Checked by hand on Windows**: the setup program installs, starts and uninstalls; a whole download driven through

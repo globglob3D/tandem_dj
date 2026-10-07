@@ -46,7 +46,7 @@ To update, install the new version over the old one. Settings and download histo
 2. **Read tracks** fills the table. The `Artist (sent)` and `Title (sent)` columns are exactly what sockseek will
    receive, so parsing mistakes are visible before anything is downloaded. Notes show further credited artists and
    tracks whose artist is unsure; tracks whose file from an earlier download is still there are marked
-   `Already downloaded`.
+   `Already downloaded`, and the `Details` column names that file and its folder.
 3. **Download** connects the VPN, then follows every track live: status (waiting, searching, downloading,
    downloaded, failed), a progress bar, the amount received, the speed and the time left, the peer and file it comes
    from, and finally the name it was saved as. The bar under the table shows the overall count, total speed and a

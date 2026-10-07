@@ -191,7 +191,14 @@ def test_build_report_sorts_tracks_by_index_state(tmp_path):
         converted: str(converted_file),
     }
     assert report.exit_code == 1
-    assert find_already_downloaded(requested, index_path) == [downloaded, already_downloaded, resumed, kept, converted]
+    assert find_already_downloaded(requested, index_path) == report.saved_files
+    assert list(find_already_downloaded(requested, index_path)) == [
+        downloaded,
+        already_downloaded,
+        resumed,
+        kept,
+        converted,
+    ]
 
 
 def test_run_while_stops_the_program_when_the_condition_fails():
@@ -255,7 +262,7 @@ def test_download_with_real_sockseek_against_local_files(tmp_path):
 
     saved_file = Path(first_report.saved_files[found])
     saved_file.unlink()
-    assert find_already_downloaded([found], settings.index_path) == []
+    assert find_already_downloaded([found], settings.index_path) == {}
     third_report = downloader.download([found], "Offline, test: run")
     assert third_report.downloaded == [found]
     assert third_report.already_downloaded == []
@@ -359,7 +366,10 @@ def test_record_downloads_updates_the_rows_of_a_track_or_adds_one(tmp_path):
         + "D:/x/a.mp3,Daniel Avery,,Naive Response,414,0,1,0\n"
         + f"{new_file},Todd Terje,Ragysh EP,Ragysh,-1,0,1,0\n"
     )
-    assert find_already_downloaded([found_again, never_seen], index_path) == [found_again, never_seen]
+    assert find_already_downloaded([found_again, never_seen], index_path) == {
+        found_again: found_file,
+        never_seen: new_file,
+    }
 
     new_index_path = tmp_path / "new" / "index.csv"
     record_downloads(new_index_path, {never_seen: new_file})

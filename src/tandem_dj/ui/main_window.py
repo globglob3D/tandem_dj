@@ -7,6 +7,7 @@ import queue
 import sys
 import threading
 import tkinter
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -385,6 +386,10 @@ class MainWindow(tkinter.Tk):
         for number, track in enumerate(unique_tracks, start=1):
             sent_values = input_row(track)
             write_log(f"  {number:>3}. {sent_values['Artist']} | {sent_values['Title']} | {sent_values['Length']}")
+        if already_downloaded:
+            write_log("Already downloaded, with the file still there (track -> file):")
+        for track, file_path in already_downloaded.items():
+            write_log(f"  {track.display_name}  ->  {file_path}")
         self.requested_tracks = unique_tracks
         self.collection = collection
         self.read_input = pasted_text
@@ -532,7 +537,11 @@ class MainWindow(tkinter.Tk):
         self.log_box.see("end")
 
     def _show_tracks(
-        self, collection: TrackCollection, tracks: list[Track], duplicate_count: int, already_downloaded: list[Track]
+        self,
+        collection: TrackCollection,
+        tracks: list[Track],
+        duplicate_count: int,
+        already_downloaded: Mapping[Track, str],
     ) -> None:
         """
         Fill the table with freshly read tracks, exactly as they will be sent to sockseek.
@@ -540,7 +549,7 @@ class MainWindow(tkinter.Tk):
         :param collection: Collection the tracks were read from
         :param tracks: Tracks that will be sent to sockseek
         :param duplicate_count: Number of parsed tracks left out as duplicates
-        :param already_downloaded: Tracks the download history already holds
+        :param already_downloaded: File of each track an earlier download saved and that is still there
         """
         self.tracker = None
         self.table.delete(*self.table.get_children())
@@ -562,7 +571,7 @@ class MainWindow(tkinter.Tk):
                 "",
                 "",
                 "",
-                "",
+                _describe_existing_file(already_downloaded[track]) if track in already_downloaded else "",
                 "; ".join(notes),
             )
             self.table.insert("", "end", iid=_row_identifier(track), values=values, tags=(status,))
@@ -647,7 +656,9 @@ class MainWindow(tkinter.Tk):
                 else f"saved as {file_name}",
             )
         for track in report.already_downloaded:
-            self._show_row(track, STATUS_ALREADY_DOWNLOADED, "", None, "skipped, downloaded by an earlier run")
+            self._show_row(
+                track, STATUS_ALREADY_DOWNLOADED, "", None, _describe_existing_file(report.saved_files.get(track, ""))
+            )
         for track in report.failed:
             entry = live_entries.get(_row_identifier(track))
             self._show_row(track, STATUS_FAILED, "", None, entry.detail if entry else "not found or failed")
@@ -738,6 +749,18 @@ def _describe_size(entry: TrackProgress) -> str:
     if entry.status == STATUS_DOWNLOADED:
         return format_size(entry.total_bytes)
     return f"{format_size(entry.bytes_transferred)} / {format_size(entry.total_bytes)}"
+
+
+def _describe_existing_file(file_path: str) -> str:
+    """
+    Tell which file makes a track count as already downloaded, and in which folder it is.
+
+    :param file_path: Path of the file an earlier download saved for the track
+    :returns: Text such as ``already have Artist - Title.mp3, in Playlist - spotify - 2026-10-07 21-45-03``
+    """
+    if not file_path:
+        return "already have it"
+    return f"already have {Path(file_path).name}, in {Path(file_path).parent.name}"
 
 
 def _draw_bar(percent: int) -> str:
