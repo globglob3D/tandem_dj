@@ -303,8 +303,9 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
 
 ## State of the project
 
-First released as 0.2.0; 0.3.0 added one folder per download. Left in a finished state on 2026-10-07. What is
-known to work and what is not:
+First released as 0.2.0; 0.3.0 added one folder per download, 0.4.0 reduced the VPN choices to two and simplified
+the settings, 0.5.0 made "already downloaded" depend on the file still being there. Left in a finished state on
+2026-10-07. What is known to work and what is not:
 
 - **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (192
   tests, none skipped, including the offline runs of the real sockseek and the hidden-window tests), the build, and
