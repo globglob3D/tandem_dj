@@ -12,7 +12,6 @@ import click
 
 from tandem_dj import __version__
 from tandem_dj.config import DEFAULT_CONFIG_PATH, ConfigurationError, Settings, load_settings
-from tandem_dj.conversion import ConversionError, convert_to_mp3, is_lossless
 from tandem_dj.models import Track, TrackCollection
 from tandem_dj.sockseek import (
     DownloadError,
@@ -24,11 +23,13 @@ from tandem_dj.sockseek import (
 )
 from tandem_dj.sources import SourceError, read_track_lines, read_tracks
 from tandem_dj.vpn import VpnError, VpnGuard
+from tandem_dj.workflow import LEVEL_ERROR, LEVEL_SUCCESS, LEVEL_WARNING, run_download
 
 STANDARD_INPUT_REFERENCE = "-"
 TYPED_COLLECTION_NAME = "typed_tracks"
 ALREADY_DOWNLOADED_NOTE = "already downloaded"
 MAXIMUM_COLUMN_WIDTH = 44
+LEVEL_COLORS = {LEVEL_SUCCESS: "green", LEVEL_WARNING: "yellow", LEVEL_ERROR: "red"}
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -105,9 +106,11 @@ def download(
         click.secho("\nDry run: nothing was downloaded.", bold=True)
         return
 
-    report = _run_download(downloader, requested_tracks, name)
-    if settings.convert_lossless_to_mp3:
-        _convert_lossless_downloads(report, settings)
+    click.echo("")
+    try:
+        report = run_download(settings, requested_tracks, name, _print_notification)
+    except (DownloadError, VpnError) as error:
+        raise click.ClickException(str(error)) from error
     _print_report(report)
     if report.failed or report.not_attempted:
         sys.exit(1)
@@ -139,6 +142,19 @@ def tracks(sources: tuple[str, ...], limit: int | None, export_path: Path | None
     if export_path is not None:
         _export_tracks(listed_tracks, export_path)
         click.echo(f"\nWrote {len(listed_tracks)} tracks to {export_path}")
+
+
+@main.command("ui")
+@click.pass_obj
+def open_window(config_path: Path | None) -> None:
+    """
+    Open the window: paste links, check the parsed tracks, download and follow every transfer.
+
+    Everything the window logs is also printed in this terminal.
+    """
+    from tandem_dj import ui
+
+    ui.run(config_path)
 
 
 @main.command("config")
@@ -230,68 +246,14 @@ def _prompt_for_lines() -> list[str]:
     return lines
 
 
-def _run_download(downloader: SockseekDownloader, requested_tracks: list[Track], name: str) -> DownloadReport:
+def _print_notification(message: str, level: str) -> None:
     """
-    Run sockseek, behind the VPN when the settings require it, and say what happens to the VPN.
+    Print a progress message of the download procedure, coloured by importance.
 
-    :param downloader: Downloader configured with the user settings
-    :param requested_tracks: Tracks to download
-    :param name: Name of the batch
-    :returns: The outcome of every requested track
-    :raises click.ClickException: If the download or the VPN cannot start
+    :param message: Message to print
+    :param level: One of the ``LEVEL_`` constants of :mod:`tandem_dj.workflow`
     """
-    settings = downloader.settings
-    try:
-        downloader.check_ready()
-        if not settings.vpn_required:
-            click.secho("\nVPN: not required by the settings, downloading from your own IP address.", fg="yellow")
-            click.secho("--- sockseek output ---", dim=True)
-            report = downloader.download(requested_tracks, name)
-            click.secho("--- end of sockseek output ---", dim=True)
-            return report
-
-        click.echo("\nVPN: connecting...")
-        guard = VpnGuard(settings.piactl_executable)
-        with guard:
-            was_connected_by_guard = guard.connected_by_guard
-            click.secho(f"VPN: {guard.describe()}", fg="green")
-            click.secho("--- sockseek output ---", dim=True)
-            report = downloader.download(requested_tracks, name, keep_running=guard.is_connected)
-            click.secho("--- end of sockseek output ---", dim=True)
-        if report.stopped_early:
-            click.secho("VPN: the connection dropped, so sockseek was stopped rather than run without it.", fg="red")
-        if was_connected_by_guard:
-            click.echo(f"VPN: disconnected again (state: {guard.read('connectionstate') or 'unknown'})")
-        else:
-            click.echo("VPN: left connected, as it was before the download.")
-        return report
-    except (DownloadError, VpnError) as error:
-        raise click.ClickException(str(error)) from error
-
-
-def _convert_lossless_downloads(report: DownloadReport, settings: Settings) -> None:
-    """
-    Convert every lossless file of a download run to MP3, recording the new file names in the report.
-
-    :param report: Outcome of the run; its saved file paths are updated in place
-    :param settings: User settings holding the conversion preferences
-    """
-    lossless_files = {
-        track: Path(file_path)
-        for track, file_path in report.saved_files.items()
-        if file_path and is_lossless(Path(file_path)) and Path(file_path).is_file()
-    }
-    if not lossless_files:
-        return
-    click.secho(f"\nConverting {len(lossless_files)} lossless files to MP3 {settings.mp3_bitrate} kbps", bold=True)
-    for track, source_path in lossless_files.items():
-        try:
-            target_path = convert_to_mp3(source_path, settings.ffmpeg_executable, settings.mp3_bitrate)
-        except ConversionError as error:
-            click.secho(f"  warning: {error}", fg="yellow")
-            continue
-        report.saved_files[track] = str(target_path)
-        click.echo(f"  {source_path.name}  ->  {target_path.name}  (original deleted)")
+    click.secho(message, fg=LEVEL_COLORS.get(level))
 
 
 def _print_collection_header(collection: TrackCollection) -> None:

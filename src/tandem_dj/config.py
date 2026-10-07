@@ -2,6 +2,7 @@
 User settings, read from ``config.toml`` at the root of the repository.
 """
 
+import json
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -100,6 +101,57 @@ def load_settings(config_path: Path | None = None) -> Settings:
     )
 
 
+def default_settings() -> Settings:
+    """
+    Build the settings used before a settings file exists, with an empty Soulseek account.
+
+    :returns: Settings holding the default folders, preferences and programs
+    """
+    return Settings(
+        soulseek_username="",
+        soulseek_password="",
+        output_directory=Path("D:/new_downloads"),
+        name_format=DEFAULT_NAME_FORMAT,
+        preferred_formats=("mp3",),
+        preferred_minimum_bitrate=320,
+        sockseek_executable=_resolve_path(DEFAULT_SOCKSEEK_EXECUTABLE),
+        index_path=_resolve_path(DEFAULT_INDEX_PATH),
+        extra_arguments=(),
+    )
+
+
+def save_settings(settings: Settings, config_path: Path | None = None) -> Path:
+    """
+    Write settings to the settings file, replacing its content.
+
+    :param settings: Settings to write
+    :param config_path: Path of the settings file, ``config.toml`` at the repository root by default
+    :returns: Path of the written file
+    """
+    path = config_path or DEFAULT_CONFIG_PATH
+    path.write_text(
+        SETTINGS_FILE_TEMPLATE.format(
+            username=_quote(settings.soulseek_username),
+            password=_quote(settings.soulseek_password),
+            output_directory=_quote(_portable_path(settings.output_directory)),
+            name_format=_quote(settings.name_format),
+            preferred_formats=_quote_list(settings.preferred_formats),
+            preferred_minimum_bitrate=settings.preferred_minimum_bitrate,
+            sockseek_executable=_quote(_portable_path(settings.sockseek_executable)),
+            index_path=_quote(_portable_path(settings.index_path)),
+            extra_arguments=_quote_list(settings.extra_arguments),
+            vpn_required=_boolean(settings.vpn_required),
+            piactl_executable=_quote(_portable_path(settings.piactl_executable)),
+            convert_lossless_to_mp3=_boolean(settings.convert_lossless_to_mp3),
+            mp3_bitrate=settings.mp3_bitrate,
+            ffmpeg_executable=_quote(settings.ffmpeg_executable),
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    return path
+
+
 class ConfigurationError(Exception):
     """
     Raised when the settings file cannot be used, with a message meant for the user.
@@ -115,3 +167,91 @@ def _resolve_path(value: str) -> Path:
     """
     path = Path(value).expanduser()
     return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+def _portable_path(path: Path) -> str:
+    """
+    Write a path the way the settings file stores it.
+
+    :param path: Absolute path
+    :returns: The path relative to the repository root when it lies inside it, with forward slashes
+    """
+    if path.is_relative_to(PROJECT_ROOT):
+        return path.relative_to(PROJECT_ROOT).as_posix()
+    return path.as_posix()
+
+
+def _quote(value: str) -> str:
+    """
+    Write text as a TOML string.
+
+    :param value: Text to write
+    :returns: The text in double quotes, with special characters escaped
+    """
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _quote_list(values: tuple[str, ...]) -> str:
+    """
+    Write several texts as a TOML array of strings.
+
+    :param values: Texts to write
+    :returns: The array on one line
+    """
+    return "[" + ", ".join(_quote(value) for value in values) + "]"
+
+
+def _boolean(value: bool) -> str:
+    """
+    Write a boolean the TOML way.
+
+    :param value: Value to write
+    :returns: ``true`` or ``false``
+    """
+    return "true" if value else "false"
+
+
+SETTINGS_FILE_TEMPLATE = """\
+# Local settings of tandem_dj, ignored by git because they hold the Soulseek password.
+# Relative paths are resolved from the repository root. This file is rewritten by the settings window.
+
+[soulseek]
+username = {username}
+password = {password}
+
+[download]
+# Folder that receives the downloaded files, directly and without subfolders.
+output_directory = {output_directory}
+
+# File naming, in sockseek's --name-format syntax (run `vendor\\sockseek\\sockseek.exe --help name-format`).
+# The default renames files to "Artist - Title" from their tags and keeps the original name for untagged files.
+name_format = {name_format}
+
+# Soft preferences: files matching them are picked first, anything else is still accepted as a fallback.
+preferred_formats = {preferred_formats}
+preferred_minimum_bitrate = {preferred_minimum_bitrate}
+
+[sockseek]
+executable = {sockseek_executable}
+
+# Download history shared by every run, so a track is only ever fetched once.
+index_path = {index_path}
+
+# Extra sockseek flags appended to every run, e.g. ["--fast-search", "--search-timeout", "8000"].
+extra_arguments = {extra_arguments}
+
+[vpn]
+# When true, downloads only run through the Private Internet Access VPN: it is connected before sockseek starts,
+# the download is stopped if the VPN drops, and the VPN is disconnected afterwards (unless it was already on).
+required = {vpn_required}
+piactl = {piactl_executable}
+
+[conversion]
+# When true, downloads that only exist in a lossless format (FLAC, WAV, AIFF) are converted to MP3 once the
+# download is over, keeping tags and cover art. The lossless original is deleted after a successful conversion.
+lossless_to_mp3 = {convert_lossless_to_mp3}
+mp3_bitrate = {mp3_bitrate}
+
+# Name of the ffmpeg program when it is on the PATH, or its full path.
+ffmpeg = {ffmpeg_executable}
+"""

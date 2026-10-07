@@ -140,6 +140,17 @@ def comparison_key(text: str) -> str:
     return "".join(character for character in decomposed if character.isalnum()).casefold()
 
 
+def track_key(artist: str, title: str) -> tuple[str, str]:
+    """
+    Build the key used to recognise the same song across spelling variants.
+
+    :param artist: Main artist name
+    :param title: Track title
+    :returns: Artist and title reduced to lowercase letters and digits
+    """
+    return comparison_key(artist), comparison_key(title)
+
+
 def _keep_musical_group(match: re.Match[str]) -> str:
     """
     Decide what replaces one bracketed group while stripping noise.

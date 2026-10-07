@@ -30,7 +30,32 @@ per terminal with `.venv\Scripts\activate`.
 
 ## Usage
 
-### Download
+There are two ways to use the toolbox: a window, and the command line. Both do exactly the same thing.
+
+### The window
+
+Double-click `tandem_ui.bat`, or run:
+
+```powershell
+tandem ui
+```
+
+1. **Paste** one or more Spotify, YouTube or SoundCloud links, or tracks written as `Artist - Title`, one per line.
+2. **Read tracks** fills the table. The `Artist (sent)` and `Title (sent)` columns are exactly what sockseek will
+   receive, so parsing mistakes are visible before anything is downloaded. Notes show further credited artists and
+   tracks whose artist is unsure; tracks from an earlier run are marked `Already downloaded`.
+3. **Download** connects the VPN, then follows every track live: status (waiting, searching, downloading,
+   downloaded, failed), a progress bar, the amount received, the speed and the time left, the peer and file it comes
+   from, and finally the name it was saved as. The bar under the table shows the overall count, total speed and a
+   rough estimate of the time left for the whole list.
+4. **Stop** ends the download early; the VPN is disconnected as usual and a later Download resumes.
+5. **Settings...** edits everything in `config.toml`: Soulseek account, download folder, preferred quality, VPN,
+   conversion.
+
+The log pane at the bottom repeats what sockseek and the toolbox say. The console window that opened alongside
+prints the same lines (plus the full list of tracks sent), as a backup if the window ever misbehaves.
+
+### Download from the command line
 
 ```powershell
 tandem download <SOURCE> [<SOURCE> ...]
@@ -109,8 +134,9 @@ unplugged USB key).
 
 ## Settings
 
-Everything is in `config.toml`, which git ignores because it holds the Soulseek password.
-[config.example.toml](config.example.toml) documents each key:
+Everything is in `config.toml`, which git ignores because it holds the Soulseek password. Edit it by hand or with
+the **Settings...** button of the window (which rewrites the file). [config.example.toml](config.example.toml)
+documents each key:
 
 - `[soulseek]`: account name and password
 - `[download]`: output folder, file naming, preferred formats and bitrate

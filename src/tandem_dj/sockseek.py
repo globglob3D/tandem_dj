@@ -8,13 +8,15 @@ doubles as a download history: tracks it already fetched are skipped on later ru
 import csv
 import re
 import subprocess
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import IO
 
 from tandem_dj.config import Settings
 from tandem_dj.models import Track
-from tandem_dj.text_cleaning import comparison_key
+from tandem_dj.text_cleaning import track_key
 
 INPUT_DIRECTORY_NAME = "inputs"
 INPUT_COLUMNS = ("Artist", "Title", "Album", "Length")
@@ -37,16 +39,22 @@ class SockseekDownloader:
         self.settings = settings
 
     def download(
-        self, tracks: Sequence[Track], name: str, keep_running: Callable[[], bool] | None = None
+        self,
+        tracks: Sequence[Track],
+        name: str,
+        keep_running: Callable[[], bool] | None = None,
+        on_output_line: Callable[[str], None] | None = None,
     ) -> "DownloadReport":
         """
         Download tracks into the output folder and report what happened to each of them.
 
-        Sockseek prints its own progress to the terminal while it runs.
+        Without ``on_output_line``, sockseek prints its own progress to the terminal. With it, sockseek output is
+        handed over line by line instead, and includes JSON progress events.
 
         :param tracks: Tracks to download; duplicates are only requested once
         :param name: Name of the batch, used to name the generated sockseek input file
         :param keep_running: Condition checked every few seconds; sockseek is stopped as soon as it returns ``False``
+        :param on_output_line: Receiver of every line sockseek prints, called from a background thread
         :returns: The outcome of every requested track
         :raises DownloadError: If sockseek or the output folder is not available
         """
@@ -54,7 +62,8 @@ class SockseekDownloader:
         requested_tracks = remove_duplicates(tracks)
         input_path = self.input_path_for(name)
         write_input_file(requested_tracks, input_path)
-        exit_code, stopped_early = run_while(self.build_command(input_path, requested_tracks), keep_running)
+        command = self.build_command(input_path, requested_tracks, emit_progress_events=on_output_line is not None)
+        exit_code, stopped_early = run_while(command, keep_running, on_output_line=on_output_line)
         report = build_report(requested_tracks, self.settings.index_path, exit_code)
         report.stopped_early = stopped_early
         return report
@@ -86,12 +95,15 @@ class SockseekDownloader:
         """
         return self.settings.index_path.parent / INPUT_DIRECTORY_NAME / f"{_file_name_from(name)}.csv"
 
-    def build_command(self, input_path: Path, tracks: Sequence[Track] = ()) -> list[str]:
+    def build_command(
+        self, input_path: Path, tracks: Sequence[Track] = (), emit_progress_events: bool = False
+    ) -> list[str]:
         """
         Assemble the sockseek command line for one input file.
 
         :param input_path: CSV file listing the tracks to download
         :param tracks: Tracks listed in the file; an unsure artist among them makes sockseek also search by title
+        :param emit_progress_events: Whether sockseek prints its progress as JSON lines
         :returns: The program path followed by its arguments
         """
         settings = self.settings
@@ -118,6 +130,8 @@ class SockseekDownloader:
             command += ["--pref-format", ",".join(settings.preferred_formats)]
         if any(track.artist_is_uncertain for track in tracks):
             command.append("--artist-maybe-wrong")
+        if emit_progress_events:
+            command.append("--progress-json")
         return command + list(settings.extra_arguments)
 
     def describe_command(self, input_path: Path, tracks: Sequence[Track] = ()) -> str:
@@ -188,16 +202,63 @@ def run_while(
     command: Sequence[str],
     keep_running: Callable[[], bool] | None,
     watch_interval_seconds: float = WATCH_INTERVAL_SECONDS,
+    on_output_line: Callable[[str], None] | None = None,
 ) -> tuple[int, bool]:
     """
-    Run a program in the terminal, stopping it as soon as a condition stops holding.
+    Run a program, stopping it as soon as a condition stops holding.
 
     :param command: Program path followed by its arguments
     :param keep_running: Condition checked at every interval; ``None`` lets the program run to its end
     :param watch_interval_seconds: Time between two checks of the condition
+    :param on_output_line: Receiver of every line the program prints, called from a background thread; without it
+        the program prints straight to the terminal
     :returns: ``(exit_code, stopped_early)``; ``stopped_early`` is ``True`` when the condition ended the program
     """
-    process = subprocess.Popen(command)
+    if on_output_line is None:
+        process = subprocess.Popen(command)
+        reader = None
+    else:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        reader = threading.Thread(target=_forward_lines, args=(process.stdout, on_output_line), daemon=True)
+        reader.start()
+    try:
+        return _wait_while(process, keep_running, watch_interval_seconds)
+    finally:
+        if reader is not None:
+            reader.join(timeout=watch_interval_seconds)
+
+
+def _forward_lines(stream: IO[str], on_output_line: Callable[[str], None]) -> None:
+    """
+    Hand every line of a stream to a receiver until the stream ends.
+
+    :param stream: Text output of a running program
+    :param on_output_line: Receiver of each line
+    """
+    for line in stream:
+        on_output_line(line)
+
+
+def _wait_while(
+    process: subprocess.Popen, keep_running: Callable[[], bool] | None, watch_interval_seconds: float
+) -> tuple[int, bool]:
+    """
+    Wait for a running program, stopping it as soon as a condition stops holding.
+
+    :param process: The running program
+    :param keep_running: Condition checked at every interval; ``None`` lets the program run to its end
+    :param watch_interval_seconds: Time between two checks of the condition
+    :returns: ``(exit_code, stopped_early)``
+    """
     try:
         while True:
             try:
@@ -237,7 +298,7 @@ def remove_duplicates(tracks: Sequence[Track]) -> list[Track]:
     """
     unique_tracks: dict[tuple[str, str], Track] = {}
     for track in tracks:
-        unique_tracks.setdefault(_track_key(track.primary_artist, track.title), track)
+        unique_tracks.setdefault(track_key(track.primary_artist, track.title), track)
     return list(unique_tracks.values())
 
 
@@ -271,7 +332,7 @@ def build_report(tracks: Sequence[Track], index_path: Path, exit_code: int) -> D
     entries = read_index(index_path)
     report = DownloadReport(exit_code=exit_code)
     for track in tracks:
-        entry = entries.get(_track_key(track.primary_artist, track.title))
+        entry = entries.get(track_key(track.primary_artist, track.title))
         if entry is not None and entry.is_downloaded:
             destination = report.downloaded if entry.state == INDEX_STATE_DOWNLOADED else report.already_downloaded
             destination.append(track)
@@ -295,7 +356,7 @@ def find_already_downloaded(tracks: Sequence[Track], index_path: Path) -> list[T
     return [
         track
         for track in tracks
-        if (entry := entries.get(_track_key(track.primary_artist, track.title))) is not None and entry.is_downloaded
+        if (entry := entries.get(track_key(track.primary_artist, track.title))) is not None and entry.is_downloaded
     ]
 
 
@@ -310,20 +371,9 @@ def read_index(index_path: Path) -> dict[tuple[str, str], IndexEntry]:
         return {}
     with index_path.open(encoding="utf-8-sig", newline="") as file:
         return {
-            _track_key(row["artist"], row["title"]): IndexEntry(state=row["state"], file_path=row["filepath"])
+            track_key(row["artist"], row["title"]): IndexEntry(state=row["state"], file_path=row["filepath"])
             for row in csv.DictReader(file)
         }
-
-
-def _track_key(artist: str, title: str) -> tuple[str, str]:
-    """
-    Build the key used to recognise the same song across spelling variants.
-
-    :param artist: Main artist name
-    :param title: Track title
-    :returns: Artist and title reduced to lowercase letters and digits
-    """
-    return comparison_key(artist), comparison_key(title)
 
 
 def _file_name_from(name: str) -> str:
