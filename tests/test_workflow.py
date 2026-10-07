@@ -8,13 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from tandem_dj import workflow
+from tandem_dj import vpn, workflow
 from tandem_dj.config import Settings, default_settings
 from tandem_dj.models import Track
 from tandem_dj.paths import bundled_sockseek, find_ffmpeg
 from tandem_dj.progress import STATUS_DOWNLOADED, STATUS_FAILED, ProgressTracker
 from tandem_dj.sockseek import DownloadReport, SockseekDownloader
-from tandem_dj.vpn import VPN_MODE_MANUAL, VPN_MODE_NONE, VisibleLocation, VpnError
+from tandem_dj.vpn import VPN_MODE_NONE, VisibleLocation
 from tandem_dj.workflow import LEVEL_ERROR, LEVEL_WARNING, DownloadCancelled, run_download
 
 SOCKSEEK_EXECUTABLE = bundled_sockseek()
@@ -99,9 +99,18 @@ def batch_directory(tmp_path: Path, name: str = "list - 2026-10-07 21-45-03") ->
     return tmp_path / "output" / name
 
 
-def test_download_without_vpn_asks_first_and_names_the_visible_address(tmp_path, recording_downloader):
+@pytest.fixture(autouse=True)
+def home_address(monkeypatch):
     """
-    Without a VPN, the user is warned that their address will be visible, and a no means nothing is downloaded.
+    Keep the watch of the visible address away from the network: it always sees the home address.
+    """
+    monkeypatch.setattr(vpn, "lookup_visible_address", lambda: HOME_LOCATION.address)
+
+
+def test_download_without_handled_vpn_asks_first_and_shows_the_visible_address(tmp_path, recording_downloader):
+    """
+    When the application handles no VPN, the user is warned and shown the address the internet sees before every
+    download, and a no means nothing is downloaded.
     """
     questions: list[str] = []
     notifications: list[tuple[str, str]] = []
@@ -127,29 +136,40 @@ def test_download_without_vpn_asks_first_and_names_the_visible_address(tmp_path,
             refuse,
         )
     assert recording_downloader.runs == []
-    assert "No VPN is used" in questions[0]
-    assert "your real IP address (203.0.113.10 (Paris, FR, Home Internet Provider))" in questions[0]
+    assert "Tandem DJ is not handling a VPN" in questions[0]
+    assert "If you use a VPN, check that it is connected" in questions[0]
+    assert "203.0.113.10 (Paris, FR, Home Internet Provider)" in questions[0]
+    assert "your real IP address" in questions[0]
 
-    report = run_download(
-        settings,
-        [TRACK],
-        "list",
-        batch_directory(tmp_path),
-        lambda message, level: notifications.append((message, level)),
-        lambda question: True,
+    notifications.clear()
+    for _ in range(2):
+        report = run_download(
+            settings,
+            [TRACK],
+            "list",
+            batch_directory(tmp_path),
+            lambda message, level: notifications.append((message, level)),
+            lambda question: bool(questions.append(question)) or True,
+        )
+        assert report.downloaded == [TRACK] and not report.stopped_early
+    assert recording_downloader.runs == [[TRACK], [TRACK]]
+    assert len(questions) == 3
+    assert notifications[1] == (
+        "VPN: not handled by Tandem DJ. You approved the download while the internet sees "
+        "203.0.113.10 (Paris, FR, Home Internet Provider).",
+        LEVEL_WARNING,
     )
-    assert report.downloaded == [TRACK]
-    assert recording_downloader.runs == [[TRACK]]
-    assert notifications[0][1] == LEVEL_WARNING
-    assert "VPN: none, downloading from your own IP address (203.0.113.10" in notifications[0][0]
 
 
-def test_download_behind_own_vpn_shows_the_visible_address_for_approval(tmp_path, recording_downloader):
+def test_download_without_handled_vpn_still_asks_when_the_address_is_unknown(
+    tmp_path, recording_downloader, monkeypatch
+):
     """
-    With a VPN the user connects, the address the internet sees is shown and a no means nothing is downloaded.
+    When no outside service says which address the internet sees, the warning says so and still needs a yes.
     """
+    monkeypatch.setattr(workflow, "lookup_visible_location", lambda: None)
     questions: list[str] = []
-    settings = make_settings(tmp_path, VPN_MODE_MANUAL)
+    settings = make_settings(tmp_path, VPN_MODE_NONE)
     with pytest.raises(DownloadCancelled):
         run_download(
             settings,
@@ -160,37 +180,27 @@ def test_download_behind_own_vpn_shows_the_visible_address_for_approval(tmp_path
             lambda question: bool(questions.append(question)),
         )
     assert recording_downloader.runs == []
-    assert "203.0.113.10 (Paris, FR, Home Internet Provider)" in questions[0]
-    assert "answer No" in questions[0]
+    assert "could not be checked" in questions[0]
+    assert "your real IP address" in questions[0]
 
+    notifications: list[tuple[str, str]] = []
     report = run_download(
-        settings, [TRACK], "list", batch_directory(tmp_path), lambda message, level: None, lambda question: True
+        settings,
+        [TRACK],
+        "list",
+        batch_directory(tmp_path),
+        lambda message, level: notifications.append((message, level)),
+        lambda question: True,
     )
-    assert report.downloaded == [TRACK] and not report.stopped_early
+    assert report.downloaded == [TRACK]
+    assert notifications[1][1] == LEVEL_WARNING and "an address that could not be checked" in notifications[1][0]
 
 
-def test_download_behind_own_vpn_refuses_to_start_when_the_address_is_unknown(
+def test_download_without_handled_vpn_stops_when_the_visible_address_changes(
     tmp_path, recording_downloader, monkeypatch
 ):
     """
-    When no outside service says which address the internet sees, nothing is asked and nothing is downloaded.
-    """
-    monkeypatch.setattr(workflow, "lookup_visible_location", lambda: None)
-    with pytest.raises(VpnError, match="unconfirmed"):
-        run_download(
-            make_settings(tmp_path, VPN_MODE_MANUAL),
-            [TRACK],
-            "list",
-            batch_directory(tmp_path),
-            lambda message, level: None,
-            lambda question: pytest.fail("nothing must be asked"),
-        )
-    assert recording_downloader.runs == []
-
-
-def test_download_behind_own_vpn_stops_when_the_visible_address_changes(tmp_path, recording_downloader, monkeypatch):
-    """
-    If the user's VPN drops during the download, the visible address changes and sockseek is stopped.
+    If a VPN connected by the user drops during the download, the visible address changes and sockseek is stopped.
     """
 
     class DroppedVpnWatch:
@@ -218,7 +228,7 @@ def test_download_behind_own_vpn_stops_when_the_visible_address_changes(tmp_path
     recording_downloader.checks_before_stopping = 3
     notifications: list[tuple[str, str]] = []
     report = run_download(
-        make_settings(tmp_path, VPN_MODE_MANUAL),
+        make_settings(tmp_path, VPN_MODE_NONE),
         [TRACK],
         "list",
         batch_directory(tmp_path),
@@ -285,7 +295,7 @@ def test_run_download_reports_progress_and_converts_other_formats(tmp_path, monk
     assert [path.name for path in batch_directory(tmp_path).iterdir()] == ["Test Artist - Test Tone.mp3"]
     assert list(settings.output_directory.iterdir()) == [batch_directory(tmp_path)]
     assert any("SongJob" in line for line in log_lines)
-    assert notifications[0][1] == LEVEL_WARNING and "VPN: none" in notifications[0][0]
+    assert notifications[1][1] == LEVEL_WARNING and "VPN: not handled by Tandem DJ" in notifications[1][0]
     assert any("Converted Test Artist - Test Tone.flac" in message for message, _ in notifications)
 
 

@@ -9,13 +9,12 @@ from tkinter import filedialog, messagebox, ttk
 
 from tandem_dj.config import Settings, save_settings
 from tandem_dj.ui import theme
-from tandem_dj.vpn import VPN_MODE_MANUAL, VPN_MODE_NONE, VPN_MODE_PIA
+from tandem_dj.vpn import VPN_MODE_NONE, VPN_MODE_PIA
 
 DIALOG_TITLE = "Tandem DJ settings"
 VPN_MODE_LABELS = {
     VPN_MODE_PIA: "Private Internet Access: connected for each download and disconnected afterwards, automatically",
-    VPN_MODE_MANUAL: "Another VPN that I connect myself: shows the address the internet sees before each download",
-    VPN_MODE_NONE: "No VPN: Soulseek users see my real IP address (a warning asks before each download)",
+    VPN_MODE_NONE: "No VPN, or a VPN I connect myself: a warning asks me to confirm before each download",
 }
 
 

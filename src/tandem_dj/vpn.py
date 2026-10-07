@@ -1,9 +1,9 @@
 """
 Protection of downloads by a VPN.
 
-Three modes exist. With Private Internet Access, :class:`VpnGuard` connects and disconnects the VPN itself through
-its ``piactl`` command line tool. With another VPN, which the user connects, :class:`AddressWatch` makes sure the
-address the internet sees stays the one the user approved. Without a VPN nothing is checked.
+Two modes exist. With Private Internet Access, :class:`VpnGuard` connects and disconnects the VPN itself through
+its ``piactl`` command line tool. Otherwise the application handles no VPN: the user has none, or connects their
+own, and :class:`AddressWatch` makes sure the address the internet sees stays the one the user approved.
 """
 
 import subprocess
@@ -16,9 +16,8 @@ from types import TracebackType
 import httpx
 
 VPN_MODE_PIA = "pia"
-VPN_MODE_MANUAL = "manual"
 VPN_MODE_NONE = "none"
-VPN_MODES = (VPN_MODE_PIA, VPN_MODE_MANUAL, VPN_MODE_NONE)
+VPN_MODE_NONE_SPELLINGS = (VPN_MODE_NONE, "manual")
 
 CONNECTED_STATE = "Connected"
 DISCONNECTED_STATE = "Disconnected"
@@ -227,8 +226,8 @@ class AddressWatch:
     """
     Watches that the address the internet sees stays the one a download was approved with.
 
-    This is the protection left when the user connects a VPN the application cannot control: if that VPN drops,
-    the visible address changes, or stops being readable when its kill switch cuts the connection.
+    This is the protection left when the user may have connected a VPN the application does not handle: if that
+    VPN drops, the visible address changes, or stops being readable when its kill switch cuts the connection.
 
     :param approved_address: Address the internet saw when the user approved the download
     :param lookup: Function returning the address the internet currently sees, empty when it cannot be read

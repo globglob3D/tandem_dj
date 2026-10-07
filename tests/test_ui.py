@@ -21,7 +21,7 @@ from tandem_dj.sockseek import DownloadReport
 from tandem_dj.ui import main_window
 from tandem_dj.ui.main_window import MainWindow
 from tandem_dj.ui.settings_dialog import SettingsDialog
-from tandem_dj.vpn import VPN_MODE_MANUAL, VPN_MODE_NONE
+from tandem_dj.vpn import VPN_MODE_NONE, VPN_MODE_PIA
 
 SKONE = Track(artists=("Sköne", "Otah"), title="Afterlife", duration_seconds=240)
 DARUDE = Track(artists=("Darude",), title="Feel the Beat", duration_seconds=259)
@@ -229,10 +229,10 @@ def test_questions_from_the_worker_are_asked_in_a_warning_box_defaulting_to_no(w
 
 def test_vpn_line_says_how_downloads_are_protected(window):
     """
-    The line under the table warns when no VPN is used.
+    The line under the table warns when the application handles no VPN.
     """
     window._show_vpn_state()
-    assert "VPN: none - downloads show your real IP address" in window.vpn_label.cget("text")
+    assert "VPN: not handled by Tandem DJ - a warning asks before each download" in window.vpn_label.cget("text")
 
 
 def test_settings_dialog_saves_the_edited_settings(window):
@@ -242,10 +242,10 @@ def test_settings_dialog_saves_the_edited_settings(window):
     dialog = SettingsDialog(window, window.settings, window.config_path)
     dialog.username.set("another-user")
     dialog.preferred_formats.set("flac, mp3")
-    dialog.vpn_mode.set(VPN_MODE_MANUAL)
+    dialog.vpn_mode.set(VPN_MODE_PIA)
     dialog._on_save()
     saved_settings = load_settings(window.config_path)
     assert dialog.saved_settings == saved_settings
     assert saved_settings.soulseek_username == "another-user"
     assert saved_settings.preferred_formats == ("flac", "mp3")
-    assert saved_settings.vpn_mode == VPN_MODE_MANUAL
+    assert saved_settings.vpn_mode == VPN_MODE_PIA

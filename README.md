@@ -137,7 +137,7 @@ Common situations:
 
 | What you see | What to do |
 | --- | --- |
-| "Private Internet Access was not found" | You have no PIA, or it is installed elsewhere: pick another [VPN](#vpn) choice in **Settings...**, or fix the path of `piactl` there. |
+| "Private Internet Access was not found" | You have no PIA, or it is installed elsewhere: pick the other [VPN](#vpn) choice in **Settings...**, or fix the path of `piactl` there. |
 | "The VPN did not connect" | Open Private Internet Access and check that you are logged in. |
 | "The output folder ... is not available" | The USB key is not plugged in, or the download folder no longer exists: pick it again in **Settings...**. |
 | A playlist folder holds fewer tracks than the playlist | The others were downloaded before and sit in the folder of that earlier download; the table marks them `Already downloaded`. To fetch one again, delete its line from the download history (see [Where things are kept](#where-things-are-kept)). |
@@ -172,13 +172,12 @@ Settings worth knowing, all in the **Settings...** dialog:
 ## VPN
 
 Soulseek is a peer-to-peer network: the people you download from see the IP address you connect with. The
-**Settings...** dialog offers three ways to deal with that:
+**Settings...** dialog offers two choices:
 
 | Choice | What happens |
 | --- | --- |
 | **Private Internet Access** (default) | The VPN is connected before each download and disconnected afterwards, automatically. The download only starts once an outside service confirms your real address is hidden, and stops within seconds if the VPN drops. You must be logged in to PIA; keep its own kill switch on "Auto" (its default) as a second line of defence. |
-| **Another VPN that I connect myself** | Before each download a box shows the address, city and provider the internet currently sees, and asks whether that is your VPN. If it shows your own city or internet provider, the VPN is off: answer No. During the download the address is checked every 20 seconds, and sockseek is stopped if it changes or can no longer be read. |
-| **No VPN** | A warning box before every download reminds you that your real IP address will be visible, and nothing is downloaded unless you answer Yes. |
+| **No VPN, or a VPN I connect myself** | Tandem DJ handles no VPN. Before every download a warning box reminds you to connect your VPN if you have one, shows the address, city and provider the internet currently sees, and explains the risk; nothing is downloaded unless you answer Yes. If the box shows your own city or internet provider, no VPN is protecting you. During the download the address is checked every 20 seconds, and sockseek is stopped if it changes or can no longer be read, which is what a VPN that drops looks like. |
 
 ## How the websites are read
 
@@ -199,8 +198,8 @@ Requirements:
 - [uv](https://docs.astral.sh/uv/)
 - the sockseek program in `vendor/sockseek/`, which `uv run python scripts/build.py --only-sockseek` downloads
   (see [vendor/sockseek/README.md](vendor/sockseek/README.md))
-- [Private Internet Access](https://www.privateinternetaccess.com/), logged in, unless another [VPN](#vpn) choice
-  is made in the settings
+- [Private Internet Access](https://www.privateinternetaccess.com/), logged in, unless the other [VPN](#vpn)
+  choice is made in the settings
 
 ffmpeg comes with the Python environment (the `imageio-ffmpeg` package), so nothing else has to be installed.
 

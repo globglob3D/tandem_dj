@@ -12,10 +12,8 @@ from tandem_dj.search_variants import SearchVariant, relaxed_search_variants
 from tandem_dj.sockseek import DownloadReport, SockseekDownloader
 from tandem_dj.text_cleaning import track_key
 from tandem_dj.vpn import (
-    VPN_MODE_MANUAL,
-    VPN_MODE_PIA,
+    VPN_MODE_NONE,
     AddressWatch,
-    VpnError,
     VpnGuard,
     lookup_visible_location,
 )
@@ -26,19 +24,21 @@ LEVEL_WARNING = "warning"
 LEVEL_ERROR = "error"
 
 STOPPED_EARLY_MESSAGE = "The download was stopped before the end."
-OWN_VPN_QUESTION = (
-    "You connect your VPN yourself, so please check it is on.\n\n"
+OWN_RESPONSIBILITY_QUESTION = (
+    "Tandem DJ is not handling a VPN for this download.\n\n"
+    "If you use a VPN, check that it is connected before you answer.\n\n"
+    "{visible_location}\n\n"
+    "Soulseek is a peer-to-peer network: every person you download from sees the address you connect with, and so "
+    "can anyone monitoring the network. Without a VPN that is your real IP address, and downloading copyrighted "
+    "music this way can be traced back to you.\n\n"
+    "Start the download?"
+)
+VISIBLE_LOCATION_KNOWN = (
     "Right now the internet sees you as:\n\n"
     "    {location}\n\n"
-    "If this is your own address, city or internet provider, your VPN is NOT connected: answer No.\n\n"
-    "Is this your VPN, and should the download start?"
+    "If this is your own address, city or internet provider, no VPN is protecting you."
 )
-NO_VPN_QUESTION = (
-    "No VPN is used.\n\n"
-    "Soulseek is a peer-to-peer network: every person you download from sees your real IP address{location}, "
-    "and so can anyone monitoring the network. Downloading copyrighted music this way can be traced back to you.\n\n"
-    "Download anyway, without a VPN?"
-)
+VISIBLE_LOCATION_UNKNOWN = "The address the internet sees right now could not be checked."
 
 Notify = Callable[[str, str], None]
 Confirm = Callable[[str], bool]
@@ -96,12 +96,10 @@ def run_download(
             )
         return report
 
-    if settings.vpn_mode == VPN_MODE_PIA:
-        report = _download_behind_vpn(downloader, download, notify, keep_running)
-    elif settings.vpn_mode == VPN_MODE_MANUAL:
-        report = _download_behind_own_vpn(download, notify, confirm, keep_running)
+    if settings.vpn_mode == VPN_MODE_NONE:
+        report = _download_at_own_responsibility(download, notify, confirm, keep_running)
     else:
-        report = _download_without_vpn(download, notify, confirm, keep_running)
+        report = _download_behind_vpn(downloader, download, notify, keep_running)
     if settings.convert_to_mp3:
         convert_downloads(report, settings, notify)
     return report
@@ -266,70 +264,54 @@ def _download_behind_vpn(
     return report
 
 
-def _download_behind_own_vpn(
+def _download_at_own_responsibility(
     download: Callable[[Callable[[], bool] | None], DownloadReport],
     notify: Notify,
     confirm: Confirm,
     keep_running: Callable[[], bool] | None,
 ) -> DownloadReport:
     """
-    Run sockseek behind a VPN the user connects, once they approved the address the internet sees.
+    Run sockseek without handling a VPN, once the user accepted the risk or checked the VPN they connect themselves.
 
-    Sockseek is stopped when that address changes or can no longer be read, which is what a dropped VPN looks like.
+    The question shows the address the internet sees. Sockseek is stopped when that address changes or can no longer
+    be read, which is what a VPN connected by the user looks like when it drops.
 
     :param download: Runs sockseek while the condition it is given holds
     :param notify: Receiver of progress messages
-    :param confirm: Asks the user whether the visible address is the one of their VPN
+    :param confirm: Asks the user whether the download should start
     :param keep_running: Extra condition to keep sockseek running, on top of the address staying the same
     :returns: The outcome of every requested track
-    :raises VpnError: If the address the internet sees cannot be read
-    :raises DownloadCancelled: If the user did not approve the address
+    :raises DownloadCancelled: If the user answered no
     """
     notify("VPN: checking which address the internet sees...", LEVEL_INFORMATION)
     location = lookup_visible_location()
-    if location is None:
-        raise VpnError(
-            "Could not check which address the internet sees, so your VPN is unconfirmed. Nothing was downloaded."
-        )
-    if not confirm(OWN_VPN_QUESTION.format(location=location.describe())):
+    visible_location = (
+        VISIBLE_LOCATION_KNOWN.format(location=location.describe()) if location else VISIBLE_LOCATION_UNKNOWN
+    )
+    if not confirm(OWN_RESPONSIBILITY_QUESTION.format(visible_location=visible_location)):
         raise DownloadCancelled
-    notify(f"VPN: connected by you, approved while the internet sees {location.describe()}", LEVEL_SUCCESS)
-    watch = AddressWatch(location.address)
-    report = download(lambda: watch.is_unchanged() and (keep_running is None or keep_running()))
-    if watch.has_changed:
+    seen_as = location.describe() if location else "an address that could not be checked"
+    notify(
+        f"VPN: not handled by Tandem DJ. You approved the download while the internet sees {seen_as}.", LEVEL_WARNING
+    )
+    watch = AddressWatch(location.address) if location else None
+
+    def address_is_unchanged_and_run_is_wanted() -> bool:
+        """
+        Tell whether sockseek may keep running.
+
+        :returns: ``True`` while the internet sees the approved address and the caller still wants the download
+        """
+        return (watch is None or watch.is_unchanged()) and (keep_running is None or keep_running())
+
+    report = download(address_is_unchanged_and_run_is_wanted)
+    if watch is not None and watch.has_changed:
         notify(
             f"VPN: the address the internet sees changed to {watch.latest_address}, so sockseek was stopped.",
             LEVEL_ERROR,
         )
-    elif watch.is_unreadable:
+    elif watch is not None and watch.is_unreadable:
         notify("VPN: the address the internet sees could no longer be read, so sockseek was stopped.", LEVEL_ERROR)
     elif report.stopped_early:
-        notify(STOPPED_EARLY_MESSAGE, LEVEL_WARNING)
-    return report
-
-
-def _download_without_vpn(
-    download: Callable[[Callable[[], bool] | None], DownloadReport],
-    notify: Notify,
-    confirm: Confirm,
-    keep_running: Callable[[], bool] | None,
-) -> DownloadReport:
-    """
-    Run sockseek from the user's own address, once they accepted the risk.
-
-    :param download: Runs sockseek while the condition it is given holds
-    :param notify: Receiver of progress messages
-    :param confirm: Asks the user whether to download without a VPN
-    :param keep_running: Condition to keep sockseek running
-    :returns: The outcome of every requested track
-    :raises DownloadCancelled: If the user did not accept the risk
-    """
-    location = lookup_visible_location()
-    described_location = f" ({location.describe()})" if location else ""
-    if not confirm(NO_VPN_QUESTION.format(location=described_location)):
-        raise DownloadCancelled
-    notify(f"VPN: none, downloading from your own IP address{described_location}.", LEVEL_WARNING)
-    report = download(keep_running)
-    if report.stopped_early:
         notify(STOPPED_EARLY_MESSAGE, LEVEL_WARNING)
     return report

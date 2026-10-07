@@ -42,7 +42,7 @@ from tandem_dj.text_cleaning import track_key
 from tandem_dj.ui import theme
 from tandem_dj.ui.settings_dialog import SettingsDialog
 from tandem_dj.ui.theme import STATUS_FOUND_RELAXED, STATUS_NOT_FINISHED
-from tandem_dj.vpn import VPN_MODE_MANUAL, VPN_MODE_NONE, VpnError, VpnGuard
+from tandem_dj.vpn import VPN_MODE_NONE, VpnError, VpnGuard
 from tandem_dj.workflow import (
     LEVEL_ERROR,
     LEVEL_INFORMATION,
@@ -241,13 +241,8 @@ class MainWindow(tkinter.Tk):
         """
         if self.settings.vpn_mode == VPN_MODE_NONE:
             self.vpn_label.configure(
-                text="VPN: none - downloads show your real IP address (see Settings)",
+                text="VPN: not handled by Tandem DJ - a warning asks before each download (see Settings)",
                 foreground=theme.LEVEL_COLORS[LEVEL_WARNING],
-            )
-        elif self.settings.vpn_mode == VPN_MODE_MANUAL:
-            self.vpn_label.configure(
-                text="VPN: connected by you - the address the internet sees is shown before each download",
-                foreground=theme.TEXT_DIM,
             )
         elif not self.settings.piactl_executable.is_file():
             self.vpn_label.configure(
