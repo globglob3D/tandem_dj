@@ -113,7 +113,7 @@ class SettingsDialog(tkinter.Toplevel):
         :param browse: Command of a browse button shown after the field, when the field is a path
         """
         ttk.Label(form, text=label).grid(row=self.next_row, column=0, sticky="w", padx=(0, 10), pady=2)
-        ttk.Entry(form, textvariable=variable, width=62, show="*" if hidden else "").grid(
+        ttk.Entry(form, textvariable=variable, width=58, show="*" if hidden else "", font=theme.FONT).grid(
             row=self.next_row, column=1, sticky="ew", pady=2
         )
         if browse is not None:

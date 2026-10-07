@@ -85,12 +85,20 @@ def apply_theme(window: tkinter.Misc) -> None:
         bordercolor=[("disabled", SURFACE_RAISED), ("active", TEXT)],
     )
     style.configure("TEntry", fieldbackground=SURFACE, foreground=TEXT_BRIGHT, padding=4)
-    style.configure("TCheckbutton", background=BACKGROUND, foreground=TEXT, indicatorcolor=SURFACE)
+    style.configure(
+        "TCheckbutton",
+        background=BACKGROUND,
+        foreground=TEXT,
+        indicatorbackground=SURFACE,
+        indicatorforeground=TEXT_BRIGHT,
+        upperbordercolor=BORDER,
+        lowerbordercolor=BORDER,
+    )
     style.map(
         "TCheckbutton",
         background=[("active", BACKGROUND)],
         foreground=[("active", TEXT_BRIGHT)],
-        indicatorcolor=[("selected", TEXT), ("pressed", SELECTION)],
+        indicatorbackground=[("selected", SELECTION), ("pressed", SELECTION)],
     )
     style.configure(
         "Treeview", background=SURFACE, fieldbackground=SURFACE, foreground=TEXT, rowheight=ROW_HEIGHT, relief="flat"
@@ -112,6 +120,7 @@ def apply_theme(window: tkinter.Misc) -> None:
         style.map(f"{orientation}.TScrollbar", background=[("active", SELECTION)])
     window.update_idletasks()
     darken_title_bar(window)
+    window.after(100, darken_title_bar, window)
 
 
 def style_text_box(text_box: tkinter.Text) -> None:
