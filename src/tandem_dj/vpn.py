@@ -208,8 +208,11 @@ class VpnGuard:
             [str(self.piactl_executable), *arguments],
             capture_output=True,
             text=True,
+            errors="replace",
+            stdin=subprocess.DEVNULL,
             timeout=COMMAND_TIMEOUT_SECONDS,
             check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
 
 
