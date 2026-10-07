@@ -14,6 +14,8 @@ uv run pytest              # tests; includes an offline run of the real sockseek
 uv run ruff format .       # formatting (line length 120, double quotes)
 uv run ruff check .        # linting
 uv run python scripts/make_icon.py   # redraw the icon files after changing the drawing
+uv run python scripts/build.py       # build dist/Tandem DJ/ and, with Inno Setup installed, the setup program
+uv run python scripts/smoke_test.py  # start the built application and check its log
 ```
 
 `uv sync` cannot replace `.venv\Scripts\tandem.exe` while a window started from it is open; close the window, or use
@@ -50,6 +52,11 @@ src/tandem_dj/
     text.py          parse_track_line() for hand-written lines
 scripts/
   make_icon.py       draws the icon (two cogwheels in pixel art) with the standard library only
+  build.py           PyInstaller build, then the Windows setup program (Inno Setup) or the macOS disk image
+  smoke_test.py      starts the built application on temporary settings and checks what its log says
+installer/
+  tandem_dj.iss      Inno Setup script of the Windows setup program
+  THIRD_PARTY_NOTICES.txt  licences of what is shipped inside the application
 tests/               pytest; no network access (address lookups are replaced); conftest.py points the user data
                      folder at a temporary folder
 vendor/sockseek/     the sockseek program (untracked, >100 MB), its licence, and restore instructions
@@ -139,6 +146,26 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
   tracebacks included, is masked before it is written.
 - `app.show_fatal_error()` uses the operating system's own message box (not Tk), because Tk failing to start is one
   of the failures it has to report.
+
+### Packaging
+
+- `scripts/build.py` runs PyInstaller in folder mode (`--windowed`, no console) on `src/tandem_dj/__main__.py`.
+  The result holds Python, Tk, the `assets` folder, `vendor/sockseek/sockseek(.exe)` with its licence, and the
+  ffmpeg of `imageio-ffmpeg` (collected by PyInstaller's own hook). About 235 MB unpacked, 78 MB as a setup program.
+- One-file mode is avoided on purpose: it unpacks everything to a temporary folder at every start.
+- On Windows the folder is wrapped by Inno Setup (`installer/tandem_dj.iss`): per-user install without
+  administrator rights, Start Menu and optional desktop shortcut, uninstaller. The uninstaller leaves the user data
+  folder alone. Inno Setup is found on the PATH or in its usual folders (`winget install JRSoftware.InnoSetup`).
+- On macOS the result is `Tandem DJ.app`, packed into a `.dmg` with a link to `/Applications`. It can only be built
+  on a Mac, which the GitHub Actions workflow does.
+- Nothing is code signed. Windows shows "Windows protected your PC" and macOS refuses the first launch until the
+  user allows it; `README.md` tells users what to click.
+- `scripts/smoke_test.py` is the check that a build works: it starts the program with `TANDEM_DJ_HOME` pointing at
+  a temporary folder and reads the `setup |` lines of its log, which prove the packed sockseek and ffmpeg answer.
+- `paths.is_packaged()` and `paths.resource_directory()` are the only places that know about PyInstaller.
+- The sockseek version to ship is `SOCKSEEK_VERSION` in `scripts/build.py`; the build downloads it when
+  `vendor/sockseek` does not hold the program of the current system.
+- The version of the application is `__version__` in `src/tandem_dj/__init__.py` and `version` in `pyproject.toml`.
 
 ## Standing requirements from the user
 
