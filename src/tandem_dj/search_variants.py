@@ -48,31 +48,7 @@ _BRACKETED_DECORATION = re.compile(rf"\s*[(\[]\s*(?:{_DECORATION})\s*[)\]]", re.
 _TRAILING_DECORATION = re.compile(rf"\s+[-–—]\s+(?:{_DECORATION})\s*$", re.IGNORECASE)
 
 
-@dataclass(frozen=True)
-class SearchVariant:
-    """
-    Another spelling of a track to search for.
-
-    :param artist: Artist to search for, empty when searching by title alone
-    :param title: Title to search for
-    :param description: What was changed, in a few words meant for the user
-    """
-
-    artist: str
-    title: str
-    description: str
-
-    @property
-    def query(self) -> str:
-        """
-        Return the search as one line of text.
-
-        :returns: ``artist - title``, or the title alone when there is no artist
-        """
-        return f"{self.artist} - {self.title}" if self.artist else self.title
-
-
-def relaxed_search_variants(track: Track) -> list[SearchVariant]:
+def relaxed_search_variants(track: Track) -> list["SearchVariant"]:
     """
     List simpler spellings of a track, from the closest to the loosest.
 
@@ -104,6 +80,30 @@ def relaxed_search_variants(track: Track) -> list[SearchVariant]:
             seen.add(identity)
             variants.append(candidate)
     return variants
+
+
+@dataclass(frozen=True)
+class SearchVariant:
+    """
+    Another spelling of a track to search for.
+
+    :param artist: Artist to search for, empty when searching by title alone
+    :param title: Title to search for
+    :param description: What was changed, in a few words meant for the user
+    """
+
+    artist: str
+    title: str
+    description: str
+
+    @property
+    def query(self) -> str:
+        """
+        Return the search as one line of text.
+
+        :returns: ``artist - title``, or the title alone when there is no artist
+        """
+        return f"{self.artist} - {self.title}" if self.artist else self.title
 
 
 def fold_accents(text: str) -> str:

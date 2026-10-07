@@ -128,7 +128,9 @@ def test_download_behind_own_vpn_shows_the_visible_address_for_approval(tmp_path
     questions: list[str] = []
     settings = make_settings(tmp_path, VPN_MODE_MANUAL)
     with pytest.raises(DownloadCancelled):
-        run_download(settings, [TRACK], "list", lambda message, level: None, lambda q: bool(questions.append(q)))
+        run_download(
+            settings, [TRACK], "list", lambda message, level: None, lambda question: bool(questions.append(question))
+        )
     assert recording_downloader.runs == []
     assert "203.0.113.10 (Paris, FR, Home Internet Provider)" in questions[0]
     assert "answer No" in questions[0]
