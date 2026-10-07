@@ -15,6 +15,7 @@ from tandem_dj.progress import (
     ProgressTracker,
     format_seconds,
     format_size,
+    remote_file_name,
 )
 from tandem_dj.search_variants import SearchVariant
 
@@ -276,3 +277,13 @@ def test_events_of_a_simpler_spelling_reach_the_track_it_stands_for():
     assert (found.status, found.saved_path) == (STATUS_DOWNLOADED, "D:/music/arret_sur_image.mp3")
     assert found.relaxed_query == "arret sur image"
     assert (untouched.status, untouched.relaxed_query) == (STATUS_WAITING, "")
+
+
+def test_remote_file_names_are_read_the_same_on_every_system():
+    """
+    The name of a shared file is the part after the last backslash, as Soulseek writes paths, or the last slash.
+    """
+    assert remote_file_name(r"@@abc\Music\Darude\Darude - Feel The Beat.mp3") == "Darude - Feel The Beat.mp3"
+    assert remote_file_name("music/album/song.flac") == "song.flac"
+    assert remote_file_name("song.mp3") == "song.mp3"
+    assert remote_file_name("") == ""

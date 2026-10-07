@@ -7,7 +7,7 @@ import threading
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
+from pathlib import PureWindowsPath
 
 from tandem_dj.models import Track
 from tandem_dj.search_variants import SearchVariant
@@ -151,7 +151,7 @@ class ProgressTracker:
             if entry is not None:
                 self._entry_by_job = {job: other for job, other in self._entry_by_job.items() if other is not entry}
                 entry.status = STATUS_DOWNLOADING
-                entry.detail = f"from {data.get('username', '?')}: {Path(str(data.get('filename', ''))).name}"
+                entry.detail = f"from {data.get('username', '?')}: {remote_file_name(str(data.get('filename', '')))}"
                 entry.total_bytes = int(data.get("size") or 0)
                 entry.bytes_transferred, entry.speed_bytes_per_second, entry.progress_at = 0, 0.0, None
         elif event_type == "download_progress":
@@ -305,6 +305,18 @@ class ProgressSummary:
         :returns: Downloaded, already downloaded and failed tracks together
         """
         return self.downloaded_count + self.already_downloaded_count + self.failed_count
+
+
+def remote_file_name(remote_path: str) -> str:
+    """
+    Extract the file name from the path of a file shared on Soulseek.
+
+    Soulseek paths use backslashes whatever the system of the peer, so the system this runs on must not decide.
+
+    :param remote_path: Path as announced by the peer, with backslashes between folders
+    :returns: The last part of the path
+    """
+    return PureWindowsPath(remote_path).name
 
 
 def format_size(byte_count: float) -> str:
