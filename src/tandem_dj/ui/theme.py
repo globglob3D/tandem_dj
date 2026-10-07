@@ -7,6 +7,7 @@ import sys
 import tkinter
 from tkinter import ttk
 
+from tandem_dj.paths import asset_path
 from tandem_dj.progress import (
     STATUS_ALREADY_DOWNLOADED,
     STATUS_DOWNLOADED,
@@ -51,6 +52,9 @@ STATUS_COLORS = {
 LEVEL_COLORS = {LEVEL_INFORMATION: TEXT_DIM, LEVEL_SUCCESS: ACCENT, LEVEL_WARNING: AMBER, LEVEL_ERROR: RED}
 
 DARK_TITLE_BAR_ATTRIBUTE = 20
+TASKBAR_IDENTIFIER = "TandemDJ.Window"
+WINDOWS_ICON_NAME = "icon.ico"
+PICTURE_ICON_NAME = "icon.png"
 
 
 def apply_theme(window: tkinter.Misc) -> None:
@@ -133,6 +137,26 @@ def apply_theme(window: tkinter.Misc) -> None:
     window.update_idletasks()
     darken_title_bar(window)
     window.after(100, darken_title_bar, window)
+
+
+def set_application_icon(window: tkinter.Tk) -> None:
+    """
+    Give the main window, its dialogs and its taskbar button the icon of the application.
+
+    On Windows the process also gets its own taskbar identity, without which the taskbar shows the icon of the
+    Python program when running from source. A missing or unreadable icon leaves the default one.
+
+    :param window: Main window of the application
+    """
+    try:
+        if sys.platform == "win32":
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(TASKBAR_IDENTIFIER)
+            window.iconbitmap(default=str(asset_path(WINDOWS_ICON_NAME)))
+        else:
+            window.icon_picture = tkinter.PhotoImage(master=window, file=str(asset_path(PICTURE_ICON_NAME)))
+            window.iconphoto(True, window.icon_picture)
+    except (tkinter.TclError, AttributeError, OSError):
+        return
 
 
 def style_text_box(text_box: tkinter.Text) -> None:

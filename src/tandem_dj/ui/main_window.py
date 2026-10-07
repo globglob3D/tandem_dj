@@ -103,6 +103,7 @@ class MainWindow(tkinter.Tk):
         self.title(WINDOW_TITLE)
         self.geometry(WINDOW_SIZE)
         self.minsize(900, 560)
+        theme.set_application_icon(self)
         theme.apply_theme(self)
         self._build_input_area()
         self._build_track_table()
