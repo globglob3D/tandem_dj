@@ -12,11 +12,13 @@ import pytest
 from tandem_dj.config import Settings
 from tandem_dj.models import Track
 from tandem_dj.paths import bundled_sockseek
+from tandem_dj.search_variants import SearchVariant
 from tandem_dj.sockseek import (
     DownloadError,
     SockseekDownloader,
     build_report,
     find_already_downloaded,
+    record_downloads,
     remove_duplicates,
     repair_index,
     run_while,
@@ -279,3 +281,73 @@ def test_interrupted_run_leftovers_do_not_cause_a_second_download(tmp_path):
     assert report.already_downloaded == [track]
     assert report.downloaded == []
     assert not saved_file.exists()
+
+
+def test_record_downloads_updates_the_rows_of_a_track_or_adds_one(tmp_path):
+    """
+    A track found under another spelling takes over its failed row; a track without any row gets a new one, and
+    other tracks are left alone.
+    """
+    index_path = tmp_path / "state" / "index.csv"
+    header = "filepath,artist,album,title,length,tracktype,state,failurereason\n"
+    index_path.parent.mkdir()
+    index_path.write_text(
+        header + ",Sköne,,L'arrêt sur image,240,0,2,9\n" + "D:/x/a.mp3,Daniel Avery,,Naive Response,414,0,1,0\n",
+        encoding="utf-8",
+    )
+    found_again = Track(artists=("Sköne", "Otah"), title="L'arrêt sur image", duration_seconds=240)
+    never_seen = Track(artists=("Todd Terje",), title="Ragysh", album="Ragysh EP")
+    record_downloads(index_path, {found_again: "D:/x/arret_sur_image.mp3", never_seen: "D:/x/ragysh.mp3"})
+    assert index_path.read_text(encoding="utf-8") == (
+        header
+        + "D:/x/arret_sur_image.mp3,Sköne,,L'arrêt sur image,240,0,1,0\n"
+        + "D:/x/a.mp3,Daniel Avery,,Naive Response,414,0,1,0\n"
+        + "D:/x/ragysh.mp3,Todd Terje,Ragysh EP,Ragysh,-1,0,1,0\n"
+    )
+    assert find_already_downloaded([found_again, never_seen], index_path) == [found_again, never_seen]
+
+    new_index_path = tmp_path / "new" / "index.csv"
+    record_downloads(new_index_path, {never_seen: "D:/x/ragysh.mp3"})
+    assert (
+        new_index_path.read_text(encoding="utf-8") == header + "D:/x/ragysh.mp3,Todd Terje,Ragysh EP,Ragysh,-1,0,1,0\n"
+    )
+
+
+@pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file(), reason="sockseek is not installed in vendor/sockseek")
+def test_track_found_under_another_spelling_is_remembered_under_its_real_name(tmp_path):
+    """
+    A file named without accents or article is missed by the exact search and found by a simpler spelling; the
+    download history then holds the track under its real name only, so the next run skips it.
+    """
+    shared_files = tmp_path / "shared"
+    shared_files.mkdir()
+    (shared_files / "skone_-_arret_sur_image.mp3").write_bytes(b"not really audio")
+    settings = make_settings(
+        tmp_path, extra_arguments=("--mock-files-dir", str(shared_files), "--mock-files-no-read-tags", "--no-progress")
+    )
+    track = Track(artists=("Sköne",), title="L'arrêt sur image")
+    hopeless = Track(artists=("Nobody Real",), title="Missing Song")
+    downloader = SockseekDownloader(settings)
+    assert downloader.download([track, hopeless], "French list").failed == [track, hopeless]
+
+    variants = {
+        track: SearchVariant("Skone", "arret sur image", "without accents, articles and punctuation"),
+        hopeless: SearchVariant("", "Missing Song", "title alone, without the artist"),
+    }
+    saved_files, stopped_early = downloader.download_variants(variants, "French list")
+    assert not stopped_early
+    assert list(saved_files) == [track]
+    assert Path(saved_files[track]).is_file()
+    assert Path(saved_files[track]).parent == settings.output_directory
+
+    index_text = settings.index_path.read_text(encoding="utf-8-sig")
+    assert "L'arrêt sur image" in index_text
+    assert "arret sur image" not in index_text
+    assert sorted(path.name for path in settings.index_path.parent.joinpath("inputs").iterdir()) == [
+        "French_list.csv",
+        "French_list_relaxed_search.csv",
+    ]
+
+    second_report = downloader.download([track, hopeless], "French list")
+    assert second_report.already_downloaded == [track]
+    assert second_report.failed == [hopeless]

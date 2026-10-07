@@ -10,19 +10,26 @@ import re
 import shutil
 import subprocess
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO
 
 from tandem_dj.config import Settings
 from tandem_dj.models import Track
+from tandem_dj.search_variants import SearchVariant
 from tandem_dj.text_cleaning import track_key
 
 INPUT_DIRECTORY_NAME = "inputs"
+RELAXED_INPUT_SUFFIX = "relaxed_search"
+RELAXED_INDEX_SUFFIX = ".index.csv"
 STAGING_DIRECTORY_NAME = ".sockseek-staging"
 INPUT_COLUMNS = ("Artist", "Title", "Album", "Length")
+INDEX_COLUMNS = ("filepath", "artist", "album", "title", "length", "tracktype", "state", "failurereason")
 INDEX_IDENTITY_COLUMNS = ("artist", "album", "title", "length")
+INDEX_UNKNOWN_LENGTH = "-1"
+INDEX_SONG_TYPE = "0"
+INDEX_NO_FAILURE = "0"
 INDEX_STATE_DOWNLOADED = "1"
 INDEX_STATE_FAILED = "2"
 INDEX_STATE_ALREADY_DOWNLOADED = "3"
@@ -77,6 +84,51 @@ class SockseekDownloader:
         report.stopped_early = stopped_early
         return report
 
+    def download_variants(
+        self,
+        variants: Mapping[Track, SearchVariant],
+        name: str,
+        keep_running: Callable[[], bool] | None = None,
+        on_output_line: Callable[[str], None] | None = None,
+    ) -> tuple[dict[Track, str], bool]:
+        """
+        Search tracks again under other spellings, and record the ones found under their real name.
+
+        Sockseek runs once on the variants with an index of its own, so the download history never holds a
+        spelling that was only a search aid. Tracks that were found are then marked as downloaded in the history,
+        which makes later runs skip them like any other download.
+
+        :param variants: Spelling to search for, for each track that was not found
+        :param name: Name of the batch, used to name the generated sockseek input file
+        :param keep_running: Condition checked every few seconds; sockseek is stopped once it returns ``False``
+        :param on_output_line: Receiver of every line sockseek prints, called from a background thread
+        :returns: The file each found track was saved to, and whether sockseek was stopped early
+        :raises DownloadError: If sockseek or the output folder is not available
+        """
+        self.check_ready()
+        input_path = self.input_path_for(f"{name} {RELAXED_INPUT_SUFFIX}")
+        variant_index_path = input_path.with_suffix(RELAXED_INDEX_SUFFIX)
+        variant_index_path.unlink(missing_ok=True)
+        rows = [
+            {"Artist": variant.artist, "Title": variant.title, "Album": "", "Length": str(track.duration_seconds or "")}
+            for track, variant in variants.items()
+        ]
+        write_input_rows(rows, input_path)
+        command = self.build_command(
+            input_path, emit_progress_events=on_output_line is not None, index_path=variant_index_path
+        )
+        _, stopped_early = run_while(command, keep_running, on_output_line=on_output_line)
+        shutil.rmtree(self.settings.output_directory / STAGING_DIRECTORY_NAME, ignore_errors=True)
+        entries = read_index(variant_index_path)
+        saved_files = {
+            track: entry.file_path
+            for track, variant in variants.items()
+            if (entry := entries.get(track_key(variant.artist, variant.title))) is not None and entry.is_downloaded
+        }
+        record_downloads(self.settings.index_path, saved_files)
+        variant_index_path.unlink(missing_ok=True)
+        return saved_files, stopped_early
+
     def check_ready(self) -> None:
         """
         Make sure sockseek can run and has somewhere to save files.
@@ -103,7 +155,11 @@ class SockseekDownloader:
         return self.settings.index_path.parent / INPUT_DIRECTORY_NAME / f"{_file_name_from(name)}.csv"
 
     def build_command(
-        self, input_path: Path, tracks: Sequence[Track] = (), emit_progress_events: bool = False
+        self,
+        input_path: Path,
+        tracks: Sequence[Track] = (),
+        emit_progress_events: bool = False,
+        index_path: Path | None = None,
     ) -> list[str]:
         """
         Assemble the sockseek command line for one input file.
@@ -111,6 +167,7 @@ class SockseekDownloader:
         :param input_path: CSV file listing the tracks to download
         :param tracks: Tracks listed in the file; an unsure artist among them makes sockseek also search by title
         :param emit_progress_events: Whether sockseek prints its progress as JSON lines
+        :param index_path: Index file sockseek reads and writes, the download history by default
         :returns: The program path followed by its arguments
         """
         settings = self.settings
@@ -129,7 +186,7 @@ class SockseekDownloader:
             "--name-format",
             settings.name_format,
             "--index-path",
-            str(settings.index_path),
+            str(index_path or settings.index_path),
             "--pref-min-bitrate",
             str(settings.preferred_minimum_bitrate),
         ]
@@ -164,6 +221,8 @@ class DownloadReport:
     :param failed: Tracks sockseek could not find or could not finish downloading
     :param not_attempted: Tracks sockseek did not finish with, typically because the run was interrupted
     :param saved_files: Path each downloaded or already downloaded track was saved to, as recorded by sockseek
+    :param relaxed_matches: Spelling that found each track which was not found under its exact name; such files
+        deserve a check by the user
     :param exit_code: Exit code of the sockseek process
     :param stopped_early: Whether sockseek was stopped because the condition to keep running stopped holding
     """
@@ -173,6 +232,7 @@ class DownloadReport:
     failed: list[Track] = field(default_factory=list)
     not_attempted: list[Track] = field(default_factory=list)
     saved_files: dict[Track, str] = field(default_factory=dict)
+    relaxed_matches: dict[Track, SearchVariant] = field(default_factory=dict)
     exit_code: int = 0
     stopped_early: bool = False
 
@@ -329,8 +389,19 @@ def write_input_file(tracks: Sequence[Track], path: Path) -> None:
     :param tracks: Tracks to list
     :param path: File to write, created along with its folder
     """
+    write_input_rows([input_row(track) for track in tracks], path)
+
+
+def write_input_rows(rows: Sequence[Mapping[str, str]], path: Path) -> None:
+    """
+    Write search rows as a CSV file that sockseek accepts as input.
+
+    The ``Length`` column is left out when no row has a length.
+
+    :param rows: Values keyed by the column names of the sockseek input file
+    :param path: File to write, created along with its folder
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    rows = [input_row(track) for track in tracks]
     columns = [column for column in INPUT_COLUMNS if column != "Length" or any(row["Length"] for row in rows)]
     with path.open("w", encoding="utf-8", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=columns, extrasaction="ignore")
@@ -433,6 +504,46 @@ def repair_index(index_path: Path) -> int:
             writer.writeheader()
             writer.writerows(kept_rows.values())
     return removed_count
+
+
+def record_downloads(index_path: Path, saved_files: Mapping[Track, str]) -> None:
+    """
+    Mark tracks as downloaded in the sockseek index, so that sockseek skips them from now on.
+
+    The rows sockseek already holds for a track are updated; a track it holds no row for gets a new one.
+
+    :param index_path: Index file written by sockseek
+    :param saved_files: Path of the saved file for each track to mark
+    """
+    if not saved_files:
+        return
+    columns, rows = list(INDEX_COLUMNS), []
+    if index_path.is_file():
+        with index_path.open(encoding="utf-8-sig", newline="") as file:
+            reader = csv.DictReader(file)
+            columns = list(reader.fieldnames or INDEX_COLUMNS)
+            rows = list(reader)
+    for track, file_path in saved_files.items():
+        key = track_key(track.primary_artist, track.title)
+        track_rows = [row for row in rows if track_key(row["artist"], row["title"]) == key]
+        if not track_rows:
+            track_rows = [
+                {
+                    "artist": track.primary_artist,
+                    "album": track.album,
+                    "title": track.title,
+                    "length": str(track.duration_seconds or INDEX_UNKNOWN_LENGTH),
+                    "tracktype": INDEX_SONG_TYPE,
+                }
+            ]
+            rows.extend(track_rows)
+        for row in track_rows:
+            row.update(filepath=file_path, state=INDEX_STATE_DOWNLOADED, failurereason=INDEX_NO_FAILURE)
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    with index_path.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=columns, lineterminator="\n", restval="", extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def _index_row_rank(row: dict[str, str]) -> tuple[int, bool]:
