@@ -246,7 +246,7 @@ def test_download_without_handled_vpn_stops_when_the_visible_address_changes(
 def test_run_download_reports_progress_and_converts_other_formats(tmp_path, monkeypatch):
     """
     A file found in another format is followed live, saved in the folder of the batch, converted to MP3 and
-    reported under its new name.
+    reported under its new name. The next download finds the MP3 and skips the track.
     """
     monkeypatch.setattr(workflow, "lookup_visible_location", lambda: HOME_LOCATION)
     shared_files = tmp_path / "shared"
@@ -297,6 +297,18 @@ def test_run_download_reports_progress_and_converts_other_formats(tmp_path, monk
     assert any("SongJob" in line for line in log_lines)
     assert notifications[1][1] == LEVEL_WARNING and "VPN: not handled by Tandem DJ" in notifications[1][0]
     assert any("Converted Test Artist - Test Tone.flac" in message for message, _ in notifications)
+
+    later_report = run_download(
+        settings,
+        [found],
+        "offline run",
+        batch_directory(tmp_path, "later"),
+        notify=lambda message, level: None,
+        confirm=lambda question: True,
+    )
+    assert later_report.already_downloaded == [found]
+    assert Path(later_report.saved_files[found]) == batch_directory(tmp_path) / "Test Artist - Test Tone.mp3"
+    assert list(settings.output_directory.iterdir()) == [batch_directory(tmp_path)]
 
 
 @pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file(), reason="sockseek is not installed in vendor/sockseek")

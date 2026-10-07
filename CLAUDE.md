@@ -144,7 +144,7 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
   afterwards, so a cancelled download, or one where everything was already downloaded, leaves nothing behind.
   `check_ready()` only checks the download folder itself, which is what tells an unplugged USB key apart.
 - Tracks skipped as already downloaded stay in the folder of the batch that fetched them; the history is shared
-  by every batch on purpose.
+  by every batch on purpose, and only counts while the file is still there (see "Things that are not obvious").
 - `Settings.name_format` still names the files inside the folder; the folder is not part of it.
 
 ### Relaxed search
@@ -245,8 +245,13 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
   names every untagged file `-.mp3`, each replacing the last. The pattern is set in `config.toml` only: the user
   found it confusing in the settings window.
 - **The sockseek index is the download history.** One shared `--index-path` is used for every run; sockseek keeps
-  the rows of other inputs and skips rows already downloaded even when the file has since been moved. State codes
-  seen in the `state` column: `1` downloaded, `2` failed, `3` skipped as already downloaded.
+  the rows of other inputs and skips rows already downloaded without looking at the file. State codes seen in the
+  `state` column: `1` downloaded, `2` failed, `3` skipped as already downloaded.
+- **The history is only believed while the file is there.** The user asked for this: "Already downloaded" must
+  mean the music is present, not that a record from the past says so. `read_index()` leaves out a downloaded row
+  whose file is gone, and `repair_index()` deletes such rows before every sockseek run, so a moved, renamed or
+  deleted file is downloaded again. The index is kept as the link between a requested track and its file, because
+  file names come from tags or from the Soulseek uploader and cannot be matched to the playlist reliably.
 - **Only the first artist is written to the sockseek input**, because a Soulseek search needs every word to match a
   file path. `Track.artists` keeps them all.
 - **sockseek exits with code 1 when some tracks fail**; that is a normal partial result, not a crash.
@@ -255,9 +260,9 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
 - **The index can hold several rows for one track**, and sockseek trusts the last one. A killed run (Stop button,
   VPN drop, crash) can leave a state `0` row after a success row, which makes sockseek download the track again.
   `repair_index()` therefore runs before every sockseek run and keeps one row per track, the most conclusive
-  (downloaded, then failed, then unfinished); `read_index()` applies the same rule when reading. A row skipped by
-  a later run may keep state `1`, so "already downloaded" is decided from a snapshot taken before sockseek starts
-  (`previously_downloaded`).
+  (downloaded with its file still there, then failed, then unfinished); `read_index()` applies the same rule when
+  reading. A row skipped by a later run may keep state `1`, so "already downloaded" is decided from a snapshot
+  taken before sockseek starts (`previously_downloaded`).
 - **Staging leftovers**: sockseek downloads into `<folder of the batch>/.sockseek-staging`; partial files stay
   there after failed transfers or a kill, so that folder is deleted after every run.
 - **PIA (`piactl`)**: `get connectionstate` says `Connected` a few seconds before traffic is really routed, and
@@ -270,7 +275,8 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
 - **Conversion** deletes the original only after ffmpeg produced a non-empty MP3, and never overwrites an
   existing MP3. When the cover art cannot be carried into an MP3, ffmpeg is run a second time without it. Tags are
   mapped from the file and from its audio stream, because Ogg and Opus keep them on the stream. The sockseek index
-  keeps the old path (such as `.flac`), which is harmless: skipping does not check files.
+  keeps the old path (such as `.flac`); when that file is gone, the index is read as pointing to the MP3 of the
+  same name next to it, so a converted track still counts as present and is shown under its real file.
 - **Shipped programs**: `paths.bundled_sockseek()` is `vendor/sockseek/sockseek(.exe)` under the shipped files, and
   `paths.find_ffmpeg()` returns the ffmpeg binary of the `imageio-ffmpeg` package (it has no ffprobe; tests read
   tags from `ffmpeg -i`). ffmpeg is not a setting. The settings file stores an empty string for sockseek, meaning
@@ -298,7 +304,7 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
 First released as 0.2.0; 0.3.0 added one folder per download. Left in a finished state on 2026-10-07. What is
 known to work and what is not:
 
-- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (192
+- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (191
   tests, none skipped, including the offline runs of the real sockseek and the hidden-window tests), the build, and
   the smoke test showing that the packaged application starts and that the sockseek and ffmpeg packed inside answer.
 - **Checked by hand on Windows**: the setup program installs, starts and uninstalls; a whole download driven through

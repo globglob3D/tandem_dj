@@ -61,6 +61,18 @@ def make_downloader(settings: Settings) -> SockseekDownloader:
     return SockseekDownloader(settings, settings.output_directory / BATCH_FOLDER_NAME)
 
 
+def save_file(path: Path) -> str:
+    """
+    Create a file standing for a downloaded track.
+
+    :param path: File to create, along with its folder
+    :returns: The path as the sockseek index would record it
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"not really audio")
+    return path.as_posix()
+
+
 def test_build_command_passes_account_folders_and_preferences(tmp_path):
     """
     The command line ignores any global sockseek config and carries every setting explicitly.
@@ -136,19 +148,24 @@ def test_remove_duplicates_compares_loosely():
 def test_build_report_sorts_tracks_by_index_state(tmp_path):
     """
     Each requested track is classified from the most conclusive state sockseek recorded for it: a success wins
-    over a stale unfinished row, and a track downloaded before the run counts as already downloaded.
+    over a stale unfinished row, and a track downloaded before the run counts as already downloaded. A recorded
+    download only counts while its file is there, under the name it was saved as or as the MP3 it was converted to.
     """
+    saved = {name: save_file(tmp_path / "music" / name) for name in ("a.mp3", "b.mp3", "c.mp3", "d.mp3")}
+    converted_file = Path(save_file(tmp_path / "music" / "e.mp3"))
     index_path = tmp_path / "index.csv"
     index_path.write_text(
         "filepath,artist,album,title,length,tracktype,state,failurereason\n"
-        "D:/x/a.mp3,Daniel Avery,,Naive Response,-1,0,1,0\n"
+        f"{saved['a.mp3']},Daniel Avery,,Naive Response,-1,0,1,0\n"
         ",Nobody Real,,Missing Song,200,0,2,9\n"
         ",Cut Short,,Interrupted Song,180,0,0,0\n"
-        "D:/x/c.mp3,Resumed,,Finished Later,200,0,1,0\n"
+        f"{saved['c.mp3']},Resumed,,Finished Later,200,0,1,0\n"
         ",Resumed,,Finished Later,200,0,0,0\n"
-        "D:/x/d.mp3,Old Favourite,,Kept,210,0,1,0\n"
-        "D:/x/b.mp3,Todd Terje,,Ragysh,500,0,1,0\n"
-        "D:/x/b.mp3,Todd Terje,,Ragysh,500,0,3,0\n",
+        f"{saved['d.mp3']},Old Favourite,,Kept,210,0,1,0\n"
+        f"{saved['b.mp3']},Todd Terje,,Ragysh,500,0,1,0\n"
+        f"{saved['b.mp3']},Todd Terje,,Ragysh,500,0,3,0\n"
+        f"{(tmp_path / 'music' / 'gone.mp3').as_posix()},Moved Away,,Lost Song,300,0,1,0\n"
+        f"{converted_file.with_suffix('.flac').as_posix()},Lossless,,Converted Song,320,0,1,0\n",
         encoding="utf-8",
     )
     downloaded = Track(artists=("Daniel Avery",), title="Naive Response")
@@ -158,20 +175,23 @@ def test_build_report_sorts_tracks_by_index_state(tmp_path):
     interrupted = Track(artists=("Cut Short",), title="Interrupted Song")
     resumed = Track(artists=("Resumed",), title="Finished Later")
     kept = Track(artists=("Old Favourite",), title="Kept")
-    requested = [downloaded, failed, already_downloaded, not_attempted, interrupted, resumed, kept]
-    report = build_report(requested, index_path, exit_code=1, previously_downloaded=[kept])
+    lost = Track(artists=("Moved Away",), title="Lost Song")
+    converted = Track(artists=("Lossless",), title="Converted Song")
+    requested = [downloaded, failed, already_downloaded, not_attempted, interrupted, resumed, kept, lost, converted]
+    report = build_report(requested, index_path, exit_code=1, previously_downloaded=[kept, converted])
     assert report.downloaded == [downloaded, resumed]
     assert report.failed == [failed]
-    assert report.already_downloaded == [already_downloaded, kept]
-    assert report.not_attempted == [not_attempted, interrupted]
+    assert report.already_downloaded == [already_downloaded, kept, converted]
+    assert report.not_attempted == [not_attempted, interrupted, lost]
     assert report.saved_files == {
-        downloaded: "D:/x/a.mp3",
-        already_downloaded: "D:/x/b.mp3",
-        resumed: "D:/x/c.mp3",
-        kept: "D:/x/d.mp3",
+        downloaded: saved["a.mp3"],
+        already_downloaded: saved["b.mp3"],
+        resumed: saved["c.mp3"],
+        kept: saved["d.mp3"],
+        converted: str(converted_file),
     }
     assert report.exit_code == 1
-    assert find_already_downloaded(requested, index_path) == [downloaded, already_downloaded, resumed, kept]
+    assert find_already_downloaded(requested, index_path) == [downloaded, already_downloaded, resumed, kept, converted]
 
 
 def test_run_while_stops_the_program_when_the_condition_fails():
@@ -207,7 +227,8 @@ def test_missing_sockseek_is_reported(tmp_path):
 def test_download_with_real_sockseek_against_local_files(tmp_path):
     """
     Sockseek, pointed at a folder of local files instead of the Soulseek network, saves a found track flat in the
-    folder of the batch, records a missing one as failed and skips the found one on the next run.
+    folder of the batch, records a missing one as failed and skips the found one on the next run. Once the saved
+    file is deleted, the track is downloaded again.
     """
     shared_files = tmp_path / "shared"
     shared_files.mkdir()
@@ -232,33 +253,51 @@ def test_download_with_real_sockseek_against_local_files(tmp_path):
     assert second_report.downloaded == []
     assert not second_report.stopped_early
 
+    saved_file = Path(first_report.saved_files[found])
+    saved_file.unlink()
+    assert find_already_downloaded([found], settings.index_path) == []
+    third_report = downloader.download([found], "Offline, test: run")
+    assert third_report.downloaded == [found]
+    assert third_report.already_downloaded == []
+    assert saved_file.is_file()
+
 
 def test_repair_index_keeps_the_most_conclusive_row_per_track(tmp_path):
     """
-    Leftover rows of interrupted runs are dropped, whatever their position; other tracks are untouched.
+    Leftover rows of interrupted runs are dropped, whatever their position, and so are downloads whose file is
+    gone; other tracks are untouched, including one whose file was converted to MP3.
     """
-    existing_file = tmp_path / "kept.mp3"
-    existing_file.write_bytes(b"audio")
+    first_file = save_file(tmp_path / "music" / "a.mp3")
+    existing_file = save_file(tmp_path / "music" / "kept.mp3")
+    comma_file = save_file(tmp_path / "music" / "c, d.mp3")
+    converted_file = Path(save_file(tmp_path / "music" / "e.mp3")).with_suffix(".flac").as_posix()
+    gone_file = (tmp_path / "music" / "gone.mp3").as_posix()
     index_path = tmp_path / "index.csv"
     header = "filepath,artist,album,title,length,tracktype,state,failurereason\n"
     index_path.write_text(
         header
-        + "D:/x/a.mp3,Daniel Avery,,Naive Response,414,0,1,0\n"
+        + f"{first_file},Daniel Avery,,Naive Response,414,0,1,0\n"
         + ",Daniel Avery,,Naive Response,414,0,0,0\n"
         + ",Nobody Real,,Missing Song,200,0,0,0\n"
         + ",Nobody Real,,Missing Song,200,0,2,9\n"
-        + f"{existing_file.as_posix()},Twice,,Saved,100,0,1,0\n"
-        + "D:/x/gone.flac,Twice,,Saved,100,0,1,0\n"
-        + '"D:/x/c, d.mp3",Datura,,"Yerba del Diablo, Pt. 3",427,0,3,0\n',
+        + f"{existing_file},Twice,,Saved,100,0,1,0\n"
+        + f"{gone_file},Twice,,Saved,100,0,1,0\n"
+        + f"{gone_file},Moved Away,,Lost Song,300,0,1,0\n"
+        + ",Moved Away,,Lost Song,300,0,0,0\n"
+        + f"{gone_file},Deleted,,Other Lost Song,310,0,3,0\n"
+        + f"{converted_file},Lossless,,Converted Song,320,0,1,0\n"
+        + f'"{comma_file}",Datura,,"Yerba del Diablo, Pt. 3",427,0,3,0\n',
         encoding="utf-8",
     )
-    assert repair_index(index_path) == 3
+    assert repair_index(index_path) == 5
     assert index_path.read_text(encoding="utf-8") == (
         header
-        + "D:/x/a.mp3,Daniel Avery,,Naive Response,414,0,1,0\n"
+        + f"{first_file},Daniel Avery,,Naive Response,414,0,1,0\n"
         + ",Nobody Real,,Missing Song,200,0,2,9\n"
-        + f"{existing_file.as_posix()},Twice,,Saved,100,0,1,0\n"
-        + '"D:/x/c, d.mp3",Datura,,"Yerba del Diablo, Pt. 3",427,0,3,0\n'
+        + f"{existing_file},Twice,,Saved,100,0,1,0\n"
+        + ",Moved Away,,Lost Song,300,0,0,0\n"
+        + f"{converted_file},Lossless,,Converted Song,320,0,1,0\n"
+        + f'"{comma_file}",Datura,,"Yerba del Diablo, Pt. 3",427,0,3,0\n'
     )
     assert repair_index(index_path) == 0
     assert repair_index(tmp_path / "missing.csv") == 0
@@ -269,7 +308,7 @@ def test_interrupted_run_leftovers_do_not_cause_a_second_download(tmp_path):
     """
     A stale unfinished row placed after a success row, which sockseek alone would act on, no longer makes it
     download the track again, and partial files left in the staging folder are cleaned up. The folder of a
-    batch that saved nothing is deleted.
+    later batch, which saved nothing, is deleted.
     """
     shared_files = tmp_path / "shared"
     shared_files.mkdir()
@@ -287,15 +326,14 @@ def test_interrupted_run_leftovers_do_not_cause_a_second_download(tmp_path):
 
     with settings.index_path.open("a", encoding="utf-8", newline="") as file:
         file.write(",Darude,,Feel the Beat,-1,0,0,0\n")
-    saved_file = downloader.batch_directory / "Darude - Feel the Beat.mp3"
-    saved_file.unlink()
+    later_downloader = SockseekDownloader(settings, settings.output_directory / "later batch")
 
-    report = downloader.download([track], "leftovers")
+    report = later_downloader.download([track], "leftovers")
     assert report.already_downloaded == [track]
     assert report.downloaded == []
-    assert not saved_file.exists()
-    assert not downloader.batch_directory.exists()
-    assert settings.output_directory.is_dir()
+    assert Path(report.saved_files[track]) == downloader.batch_directory / "Darude - Feel the Beat.mp3"
+    assert not later_downloader.batch_directory.exists()
+    assert [path.name for path in settings.output_directory.iterdir()] == [BATCH_FOLDER_NAME]
 
 
 def test_record_downloads_updates_the_rows_of_a_track_or_adds_one(tmp_path):
@@ -312,20 +350,20 @@ def test_record_downloads_updates_the_rows_of_a_track_or_adds_one(tmp_path):
     )
     found_again = Track(artists=("Sköne", "Otah"), title="L'arrêt sur image", duration_seconds=240)
     never_seen = Track(artists=("Todd Terje",), title="Ragysh", album="Ragysh EP")
-    record_downloads(index_path, {found_again: "D:/x/arret_sur_image.mp3", never_seen: "D:/x/ragysh.mp3"})
+    found_file = save_file(tmp_path / "music" / "arret_sur_image.mp3")
+    new_file = save_file(tmp_path / "music" / "ragysh.mp3")
+    record_downloads(index_path, {found_again: found_file, never_seen: new_file})
     assert index_path.read_text(encoding="utf-8") == (
         header
-        + "D:/x/arret_sur_image.mp3,Sköne,,L'arrêt sur image,240,0,1,0\n"
+        + f"{found_file},Sköne,,L'arrêt sur image,240,0,1,0\n"
         + "D:/x/a.mp3,Daniel Avery,,Naive Response,414,0,1,0\n"
-        + "D:/x/ragysh.mp3,Todd Terje,Ragysh EP,Ragysh,-1,0,1,0\n"
+        + f"{new_file},Todd Terje,Ragysh EP,Ragysh,-1,0,1,0\n"
     )
     assert find_already_downloaded([found_again, never_seen], index_path) == [found_again, never_seen]
 
     new_index_path = tmp_path / "new" / "index.csv"
-    record_downloads(new_index_path, {never_seen: "D:/x/ragysh.mp3"})
-    assert (
-        new_index_path.read_text(encoding="utf-8") == header + "D:/x/ragysh.mp3,Todd Terje,Ragysh EP,Ragysh,-1,0,1,0\n"
-    )
+    record_downloads(new_index_path, {never_seen: new_file})
+    assert new_index_path.read_text(encoding="utf-8") == header + f"{new_file},Todd Terje,Ragysh EP,Ragysh,-1,0,1,0\n"
 
 
 @pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file(), reason="sockseek is not installed in vendor/sockseek")

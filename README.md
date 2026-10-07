@@ -45,7 +45,8 @@ To update, install the new version over the old one. Settings and download histo
    The path of a text file holding such lines works too.
 2. **Read tracks** fills the table. The `Artist (sent)` and `Title (sent)` columns are exactly what sockseek will
    receive, so parsing mistakes are visible before anything is downloaded. Notes show further credited artists and
-   tracks whose artist is unsure; tracks from an earlier run are marked `Already downloaded`.
+   tracks whose artist is unsure; tracks whose file from an earlier download is still there are marked
+   `Already downloaded`.
 3. **Download** connects the VPN, then follows every track live: status (waiting, searching, downloading,
    downloaded, failed), a progress bar, the amount received, the speed and the time left, the peer and file it comes
    from, and finally the name it was saved as. The bar under the table shows the overall count, total speed and a
@@ -85,8 +86,9 @@ Every download gets a new folder inside the download folder chosen in the settin
 - Characters a folder name cannot hold (`/ \ : * ? " < > |`) become spaces, and a very long playlist name is cut.
 - Inside the folder, files are named `Artist - Title.mp3` from their tags, without subfolders. A file without
   tags keeps the name it had on Soulseek.
-- A track downloaded earlier is not fetched again (see below), so it stays in the folder of the download that
-  fetched it. The new folder holds only what is new, and no folder is created when nothing new was saved.
+- A track downloaded earlier, whose file is still there, is not fetched again (see below): it stays in the folder
+  of the download that fetched it. The new folder holds only what is new, and no folder is created when nothing new
+  was saved.
 
 Good to know:
 
@@ -96,9 +98,9 @@ Good to know:
 - Stopping a download midway is safe: finished tracks stay recorded, the next run picks up the rest, and the
   partial files sockseek leaves in `.sockseek-staging` inside the folder of the download are deleted after every
   run.
-- **Downloading the same list again only fetches what is new.** Every outcome is recorded in the download history,
-  so a track is fetched once even if you later move the file off the USB key. Tracks that failed are retried on the
-  next run.
+- **Downloading the same list again only fetches what is missing.** The download history records where every
+  track was saved, and a track is skipped only while that file is still there. A file you moved, renamed or
+  deleted is downloaded again, and so are the tracks that failed.
 - Soulseek limits searches to about 34 every 220 seconds, so a 200 track playlist takes at least 20 minutes.
 
 ## When a track is not found
@@ -141,7 +143,8 @@ Common situations:
 | "Private Internet Access was not found" | You have no PIA, or it is installed elsewhere: pick the other [VPN](#vpn) choice in **Settings...**, or fix the path of `piactl` there. |
 | "The VPN did not connect" | Open Private Internet Access and check that you are logged in. |
 | "The output folder ... is not available" | The USB key is not plugged in, or the download folder no longer exists: pick it again in **Settings...**. |
-| A playlist folder holds fewer tracks than the playlist | The others were downloaded before and sit in the folder of that earlier download; the table marks them `Already downloaded`. To fetch one again, delete its line from the download history (see [Where things are kept](#where-things-are-kept)). |
+| A playlist folder holds fewer tracks than the playlist | The others were downloaded before and still sit in the folder of that earlier download; the table marks them `Already downloaded`. To fetch one again, delete or move its file. |
+| A track is downloaded again although you already have it | Its file is no longer where Tandem DJ saved it (moved, renamed or deleted), so it counts as missing. |
 | Every track fails at once | The Soulseek user name or password is wrong, or the same account is logged in elsewhere (a second login kicks the first). |
 | A link gives an error but worked before | The website changed. Install a newer Tandem DJ; meanwhile, paste the tracks as `Artist - Title` lines. |
 | Tracks marked "Not finished" | The download was stopped or the VPN dropped: click **Download** again, finished tracks are skipped. |
@@ -157,8 +160,8 @@ Everything the application writes lives in one folder per user:
 | Linux (running from source only) | `~/.local/share/tandem-dj` |
 
 - `config.toml`: the settings, written by the **Settings...** button. It holds the Soulseek password.
-- `data/sockseek_index.csv`: the download history. To download a track again, delete its line (or delete the file
-  to forget everything).
+- `data/sockseek_index.csv`: the download history, which records where each track was saved. It is only believed
+  while the file is still there, so there is nothing to edit in it.
 - `data/inputs/`: the track lists handed to sockseek, one file per playlist.
 - `logs/`: the log files of the last 20 launches.
 

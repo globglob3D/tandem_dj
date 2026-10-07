@@ -2,7 +2,8 @@
 Soulseek downloads, delegated to the sockseek program.
 
 Tracks are handed to sockseek as a CSV file. Sockseek records the outcome of every track in an index file, which
-doubles as a download history: tracks it already fetched are skipped on later runs, wherever the files are now.
+doubles as a download history: a track it already fetched is skipped on later runs, as long as its file is still
+where it was saved. A track whose file was moved or deleted is downloaded again.
 """
 
 import contextlib
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import IO
 
 from tandem_dj.config import Settings
+from tandem_dj.conversion import MP3_EXTENSION
 from tandem_dj.models import Track
 from tandem_dj.search_variants import SearchVariant
 from tandem_dj.text_cleaning import track_key
@@ -64,9 +66,9 @@ class SockseekDownloader:
         With ``on_output_line``, sockseek output is handed over line by line and includes JSON progress events.
         Without it, sockseek writes to the standard output of the application, if it has one.
 
-        Before the run, leftovers of interrupted runs are removed from the index; after it, the partial files
-        sockseek leaves in its staging folder inside the folder of the batch are deleted, and so is that folder
-        when nothing was saved in it.
+        Before the run, leftovers of interrupted runs and downloads whose file is gone are removed from the index;
+        after it, the partial files sockseek leaves in its staging folder inside the folder of the batch are
+        deleted, and so is that folder when nothing was saved in it.
 
         :param tracks: Tracks to download; duplicates are only requested once
         :param name: Name of the batch, used to name the generated sockseek input file
@@ -242,7 +244,7 @@ class DownloadReport:
     What happened to every track of a download run.
 
     :param downloaded: Tracks fetched during a run and saved to the folder of the batch
-    :param already_downloaded: Tracks skipped because the download history already holds them
+    :param already_downloaded: Tracks skipped because the file an earlier run saved for them is still there
     :param failed: Tracks sockseek could not find or could not finish downloading
     :param not_attempted: Tracks sockseek did not finish with, typically because the run was interrupted
     :param saved_files: Path each downloaded or already downloaded track was saved to, as recorded by sockseek
@@ -268,7 +270,7 @@ class IndexEntry:
     What the sockseek index records about one track.
 
     :param state: Sockseek state code of the track
-    :param file_path: Path the file was saved to, empty when the track was never downloaded
+    :param file_path: Path of the file saved for the track, empty when the track was never downloaded
     """
 
     state: str
@@ -277,7 +279,7 @@ class IndexEntry:
     @property
     def is_downloaded(self) -> bool:
         """
-        Tell whether sockseek holds this track as downloaded and will skip it.
+        Tell whether sockseek holds this track as downloaded.
 
         :returns: ``True`` for tracks fetched by this run or an earlier one
         """
@@ -439,7 +441,7 @@ def build_report(
     :param tracks: Tracks that were requested
     :param index_path: Index file written by sockseek
     :param exit_code: Exit code of the sockseek process
-    :param previously_downloaded: Tracks the index already held as downloaded before the run
+    :param previously_downloaded: Tracks whose file was already there before the run
     :returns: The tracks sorted by outcome
     """
     entries = read_index(index_path)
@@ -460,11 +462,11 @@ def build_report(
 
 def find_already_downloaded(tracks: Sequence[Track], index_path: Path) -> list[Track]:
     """
-    Pick the tracks the download history already holds, which sockseek will skip.
+    Pick the tracks an earlier run downloaded and whose file is still there, which sockseek will skip.
 
     :param tracks: Tracks about to be requested
     :param index_path: Index file written by sockseek
-    :returns: The tracks recorded as downloaded by an earlier run
+    :returns: The tracks that need no download
     """
     entries = read_index(index_path)
     return [
@@ -480,6 +482,8 @@ def read_index(index_path: Path) -> dict[tuple[str, str], IndexEntry]:
 
     The index can hold several rows for one track, for instance a row left unfinished by an interrupted run next
     to the row of a later success. A downloaded row wins over a failed one, which wins over an unfinished one.
+    A downloaded row whose file is no longer there is left out, and the entry of a file converted to MP3 holds
+    the path of the MP3.
 
     :param index_path: Index file written by sockseek
     :returns: Index entries keyed by loosely compared ``(artist, title)``; empty when there is no index yet
@@ -489,8 +493,10 @@ def read_index(index_path: Path) -> dict[tuple[str, str], IndexEntry]:
     entries: dict[tuple[str, str], IndexEntry] = {}
     with index_path.open(encoding="utf-8-sig", newline="") as file:
         for row in csv.DictReader(file):
+            entry = _read_index_row(row)
+            if entry is None:
+                continue
             key = track_key(row["artist"], row["title"])
-            entry = IndexEntry(state=row["state"], file_path=row["filepath"])
             if key not in entries or entry.conclusiveness >= entries[key].conclusiveness:
                 entries[key] = entry
     return entries
@@ -498,11 +504,13 @@ def read_index(index_path: Path) -> dict[tuple[str, str], IndexEntry]:
 
 def repair_index(index_path: Path) -> int:
     """
-    Rewrite the sockseek index so that every track has a single row, the most conclusive one.
+    Rewrite the sockseek index so that it only holds what sockseek should act on: a single row per track, the
+    most conclusive one, and no download whose file is gone.
 
-    Sockseek trusts the last row it finds for a track. A run that was killed can leave an unfinished row after
-    the row of a success, which would make sockseek download that track again; this removes such leftovers.
-    Among equally conclusive rows, one whose file still exists is preferred, then the most recent.
+    Sockseek trusts the last row it finds for a track, without looking at the file. A run that was killed can
+    leave an unfinished row after the row of a success, which would make sockseek download that track again; a
+    downloaded row whose file was moved or deleted would make it skip a track that is no longer there. Both kinds
+    of rows are removed. Among equally conclusive rows, the most recent is kept.
 
     :param index_path: Index file written by sockseek
     :returns: Number of rows removed
@@ -514,10 +522,15 @@ def repair_index(index_path: Path) -> int:
         columns = reader.fieldnames or []
         rows = list(reader)
     kept_rows: dict[tuple[str, ...], dict[str, str]] = {}
+    kept_entries: dict[tuple[str, ...], IndexEntry] = {}
     for row in rows:
+        entry = _read_index_row(row)
+        if entry is None:
+            continue
         key = tuple(row[column] for column in INDEX_IDENTITY_COLUMNS)
-        if key not in kept_rows or _index_row_rank(row) >= _index_row_rank(kept_rows[key]):
+        if key not in kept_entries or entry.conclusiveness >= kept_entries[key].conclusiveness:
             kept_rows[key] = row
+            kept_entries[key] = entry
     removed_count = len(rows) - len(kept_rows)
     if removed_count:
         with index_path.open("w", encoding="utf-8", newline="") as file:
@@ -567,15 +580,37 @@ def record_downloads(index_path: Path, saved_files: Mapping[Track, str]) -> None
         writer.writerows(rows)
 
 
-def _index_row_rank(row: dict[str, str]) -> tuple[int, bool]:
+def _locate_saved_file(recorded_path: str) -> str:
     """
-    Rank an index row by how much it should be trusted.
+    Find the file the sockseek index records for a downloaded track, as it is on the disk now.
+
+    The index keeps the name a file was downloaded under, so a file converted since is found as the MP3 next to
+    that name.
+
+    :param recorded_path: Path in the ``filepath`` column of the index
+    :returns: Path of the file, empty when it was moved or deleted
+    """
+    if not recorded_path:
+        return ""
+    if Path(recorded_path).is_file():
+        return recorded_path
+    converted_path = Path(recorded_path).with_suffix(MP3_EXTENSION)
+    return str(converted_path) if converted_path.is_file() else ""
+
+
+def _read_index_row(row: Mapping[str, str]) -> IndexEntry | None:
+    """
+    Read one row of the sockseek index, checking a recorded download against the disk.
 
     :param row: Row of the sockseek index
-    :returns: Conclusiveness of its state, then whether its file still exists
+    :returns: The entry of the row, holding the path of the file as it is now; ``None`` for a download whose file
+        is no longer there
     """
     entry = IndexEntry(state=row["state"], file_path=row["filepath"])
-    return entry.conclusiveness, bool(entry.file_path) and Path(entry.file_path).is_file()
+    if not entry.is_downloaded:
+        return entry
+    saved_file = _locate_saved_file(entry.file_path)
+    return IndexEntry(state=entry.state, file_path=saved_file) if saved_file else None
 
 
 def _file_name_from(name: str) -> str:
