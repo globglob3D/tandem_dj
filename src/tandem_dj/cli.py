@@ -12,12 +12,23 @@ import click
 
 from tandem_dj import __version__
 from tandem_dj.config import DEFAULT_CONFIG_PATH, ConfigurationError, Settings, load_settings
+from tandem_dj.conversion import ConversionError, convert_to_mp3, is_lossless
 from tandem_dj.models import Track, TrackCollection
-from tandem_dj.sockseek import DownloadError, DownloadReport, SockseekDownloader, remove_duplicates
+from tandem_dj.sockseek import (
+    DownloadError,
+    DownloadReport,
+    SockseekDownloader,
+    find_already_downloaded,
+    input_row,
+    remove_duplicates,
+)
 from tandem_dj.sources import SourceError, read_track_lines, read_tracks
+from tandem_dj.vpn import VpnError, VpnGuard
 
 STANDARD_INPUT_REFERENCE = "-"
 TYPED_COLLECTION_NAME = "typed_tracks"
+ALREADY_DOWNLOADED_NOTE = "already downloaded"
+MAXIMUM_COLUMN_WIDTH = 44
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -64,7 +75,10 @@ def download(
     a quoted "Artist - Title", or "-" to read lines from standard input. Without any SOURCE, tracks are typed or
     pasted in the terminal.
 
-    Tracks downloaded by an earlier run are skipped, so running the same playlist again only fetches what is new.
+    The exact artist and title sent to sockseek are listed for every track before anything is downloaded. Tracks
+    downloaded by an earlier run are skipped, so running the same playlist again only fetches what is new.
+
+    When the settings require it, the VPN is connected for the duration of the download and disconnected afterwards.
     """
     settings = _load_settings_or_exit(config_path)
     if output_dir is not None:
@@ -74,22 +88,26 @@ def download(
         settings = dataclasses.replace(settings, preferred_formats=preferred_formats)
 
     collections = _read_collections(sources)
-    requested_tracks = remove_duplicates([track for collection in collections for track in collection.tracks])[:limit]
+    parsed_tracks = [track for collection in collections for track in collection.tracks]
+    unique_tracks = remove_duplicates(parsed_tracks)
+    requested_tracks = unique_tracks[:limit]
     if not requested_tracks:
         raise click.ClickException("No tracks to download.")
     name = collections[0].name if len(collections) == 1 else f"{collections[0].name}_and_more"
-    for collection in collections:
-        _print_collection_header(collection)
-    _print_tracks(requested_tracks)
-    click.echo(f"\n{len(requested_tracks)} tracks -> {settings.output_directory}")
+    downloader = SockseekDownloader(settings)
+    already_downloaded = find_already_downloaded(requested_tracks, settings.index_path)
+
+    click.secho("\nTracks as sent to sockseek", bold=True)
+    _print_track_table(requested_tracks, already_downloaded)
+    _print_left_out_tracks(parsed_tracks, unique_tracks, requested_tracks)
+    _print_download_plan(downloader, name, requested_tracks, already_downloaded)
     if dry_run:
-        click.echo("Dry run: nothing was downloaded.")
+        click.secho("\nDry run: nothing was downloaded.", bold=True)
         return
 
-    try:
-        report = SockseekDownloader(settings).download(requested_tracks, name)
-    except DownloadError as error:
-        raise click.ClickException(str(error)) from error
+    report = _run_download(downloader, requested_tracks, name)
+    if settings.convert_lossless_to_mp3:
+        _convert_lossless_downloads(report, settings)
     _print_report(report)
     if report.failed or report.not_attempted:
         sys.exit(1)
@@ -108,14 +126,15 @@ def tracks(sources: tuple[str, ...], limit: int | None, export_path: Path | None
     """
     Show the tracks found in each SOURCE without downloading anything.
 
-    SOURCE takes the same forms as for the download command.
+    The artist and title columns are exactly what the download command would send to sockseek. SOURCE takes the
+    same forms as for the download command.
     """
     collections = _read_collections(sources)
     listed_tracks: list[Track] = []
     for collection in collections:
-        _print_collection_header(collection)
         collection_tracks = collection.tracks[:limit]
-        _print_tracks(collection_tracks)
+        click.secho(f"\nTracks of {collection.name}, as they would be sent to sockseek", bold=True)
+        _print_track_table(collection_tracks)
         listed_tracks.extend(collection_tracks)
     if export_path is not None:
         _export_tracks(listed_tracks, export_path)
@@ -130,6 +149,7 @@ def show_config(config_path: Path | None) -> None:
     """
     settings = _load_settings_or_exit(config_path)
     version = _sockseek_version(settings)
+    vpn_is_usable = settings.piactl_executable.is_file() or not settings.vpn_required
     rows = [
         ("Settings file", config_path or DEFAULT_CONFIG_PATH, True),
         ("Soulseek account", settings.soulseek_username, True),
@@ -140,6 +160,10 @@ def show_config(config_path: Path | None) -> None:
         ("Preferred formats", ", ".join(settings.preferred_formats) or "any", True),
         ("Preferred bitrate", f">= {settings.preferred_minimum_bitrate} kbps", True),
         ("Extra sockseek flags", " ".join(settings.extra_arguments) or "none", True),
+        ("VPN for downloads", "required" if settings.vpn_required else "not required", True),
+        ("VPN client", settings.piactl_executable, vpn_is_usable),
+        ("VPN state", _describe_vpn(settings), True),
+        ("Lossless files", _describe_conversion(settings), True),
     ]
     for label, value, is_valid in rows:
         click.echo(f"{label:<22}{value}" + ("" if is_valid else click.style("   <- missing", fg="red")))
@@ -163,24 +187,28 @@ def _load_settings_or_exit(config_path: Path | None) -> Settings:
 
 def _read_collections(sources: tuple[str, ...]) -> list[TrackCollection]:
     """
-    Read the tracks of every source given on the command line.
+    Read the tracks of every source given on the command line, announcing each one.
 
     :param sources: Sources given by the user; empty to type tracks in the terminal
     :returns: One collection per source
     :raises click.ClickException: If a source cannot be read
     """
+    collections = []
     try:
         if not sources:
-            return [read_track_lines(_prompt_for_lines(), name=TYPED_COLLECTION_NAME)]
-        collections = []
+            collections.append(read_track_lines(_prompt_for_lines(), name=TYPED_COLLECTION_NAME))
         for source in sources:
             if source == STANDARD_INPUT_REFERENCE:
+                click.echo("Reading tracks from standard input...")
                 collections.append(read_track_lines(sys.stdin.read().splitlines(), name=TYPED_COLLECTION_NAME))
             else:
+                click.echo(f"Reading {source} ...")
                 collections.append(read_tracks(source))
-        return collections
     except SourceError as error:
         raise click.ClickException(str(error)) from error
+    for collection in collections:
+        _print_collection_header(collection)
+    return collections
 
 
 def _prompt_for_lines() -> list[str]:
@@ -202,60 +230,231 @@ def _prompt_for_lines() -> list[str]:
     return lines
 
 
+def _run_download(downloader: SockseekDownloader, requested_tracks: list[Track], name: str) -> DownloadReport:
+    """
+    Run sockseek, behind the VPN when the settings require it, and say what happens to the VPN.
+
+    :param downloader: Downloader configured with the user settings
+    :param requested_tracks: Tracks to download
+    :param name: Name of the batch
+    :returns: The outcome of every requested track
+    :raises click.ClickException: If the download or the VPN cannot start
+    """
+    settings = downloader.settings
+    try:
+        downloader.check_ready()
+        if not settings.vpn_required:
+            click.secho("\nVPN: not required by the settings, downloading from your own IP address.", fg="yellow")
+            click.secho("--- sockseek output ---", dim=True)
+            report = downloader.download(requested_tracks, name)
+            click.secho("--- end of sockseek output ---", dim=True)
+            return report
+
+        click.echo("\nVPN: connecting...")
+        guard = VpnGuard(settings.piactl_executable)
+        with guard:
+            was_connected_by_guard = guard.connected_by_guard
+            click.secho(f"VPN: {guard.describe()}", fg="green")
+            click.secho("--- sockseek output ---", dim=True)
+            report = downloader.download(requested_tracks, name, keep_running=guard.is_connected)
+            click.secho("--- end of sockseek output ---", dim=True)
+        if report.stopped_early:
+            click.secho("VPN: the connection dropped, so sockseek was stopped rather than run without it.", fg="red")
+        if was_connected_by_guard:
+            click.echo(f"VPN: disconnected again (state: {guard.read('connectionstate') or 'unknown'})")
+        else:
+            click.echo("VPN: left connected, as it was before the download.")
+        return report
+    except (DownloadError, VpnError) as error:
+        raise click.ClickException(str(error)) from error
+
+
+def _convert_lossless_downloads(report: DownloadReport, settings: Settings) -> None:
+    """
+    Convert every lossless file of a download run to MP3, recording the new file names in the report.
+
+    :param report: Outcome of the run; its saved file paths are updated in place
+    :param settings: User settings holding the conversion preferences
+    """
+    lossless_files = {
+        track: Path(file_path)
+        for track, file_path in report.saved_files.items()
+        if file_path and is_lossless(Path(file_path)) and Path(file_path).is_file()
+    }
+    if not lossless_files:
+        return
+    click.secho(f"\nConverting {len(lossless_files)} lossless files to MP3 {settings.mp3_bitrate} kbps", bold=True)
+    for track, source_path in lossless_files.items():
+        try:
+            target_path = convert_to_mp3(source_path, settings.ffmpeg_executable, settings.mp3_bitrate)
+        except ConversionError as error:
+            click.secho(f"  warning: {error}", fg="yellow")
+            continue
+        report.saved_files[track] = str(target_path)
+        click.echo(f"  {source_path.name}  ->  {target_path.name}  (original deleted)")
+
+
 def _print_collection_header(collection: TrackCollection) -> None:
     """
     Print the name of a collection, where it comes from and any warning about it.
 
     :param collection: Collection to describe
     """
-    click.secho(f"\n{collection.name}  [{collection.origin}, {len(collection.tracks)} tracks]", bold=True)
+    location = f"  {collection.url}" if collection.url else ""
+    click.secho(f"  {collection.name}  [{collection.origin}, {len(collection.tracks)} tracks]{location}", bold=True)
     for warning in collection.warnings:
         click.secho(f"  warning: {warning}", fg="yellow")
 
 
-def _print_tracks(tracks: list[Track]) -> None:
+def _print_track_table(listed_tracks: list[Track], already_downloaded: list[Track] | tuple[Track, ...] = ()) -> None:
     """
-    Print a numbered list of tracks with their length.
+    Print tracks as a table whose artist, title, album and length columns are the values sent to sockseek.
 
-    :param tracks: Tracks to list
+    The notes column holds what is not sent: further credited artists, doubts about the artist, and whether the
+    download history already holds the track.
+
+    :param listed_tracks: Tracks to list
+    :param already_downloaded: Tracks among them that the download history already holds
     """
-    number_width = len(str(len(tracks)))
-    for number, track in enumerate(tracks, start=1):
-        details = _format_duration(track.duration_seconds)
+    rows = []
+    for number, track in enumerate(listed_tracks, start=1):
+        sent_values = input_row(track)
+        notes = []
+        if len(track.artists) > 1:
+            notes.append("also credited: " + ", ".join(track.artists[1:]))
         if track.artist_is_uncertain:
-            details = f"{details}  artist unsure".strip()
-        click.echo(f"  {number:>{number_width}}. {track.display_name}" + (f"  ({details})" if details else ""))
+            notes.append("artist unsure, also searched by title alone")
+        if track in already_downloaded:
+            notes.append(ALREADY_DOWNLOADED_NOTE)
+        rows.append(
+            {
+                "#": str(number),
+                "Artist": sent_values["Artist"],
+                "Title": sent_values["Title"],
+                "Length": _format_duration(track.duration_seconds),
+                "Album": sent_values["Album"],
+                "Notes": "; ".join(notes),
+            }
+        )
+    _print_table(rows)
+
+
+def _print_table(rows: list[dict[str, str]]) -> None:
+    """
+    Print rows as aligned columns under a header, leaving out columns that are empty everywhere.
+
+    Values are never shortened: one longer than the widest allowed column pushes the rest of its own row only.
+
+    :param rows: Rows keyed by column name, all with the same keys
+    """
+    if not rows:
+        click.echo("  (no tracks)")
+        return
+    columns = [column for column in rows[0] if any(row[column] for row in rows)]
+    widths = {
+        column: min(max(len(column), *(len(row[column]) for row in rows)), MAXIMUM_COLUMN_WIDTH) for column in columns
+    }
+    last_column = columns[-1]
+
+    def format_row(values: dict[str, str]) -> str:
+        cells = [
+            values[column].rjust(widths[column])
+            if column == "#"
+            else (values[column] if column == last_column else values[column].ljust(widths[column]))
+            for column in columns
+        ]
+        return "  " + "  ".join(cells).rstrip()
+
+    click.secho(format_row({column: column for column in columns}), underline=True)
+    for row in rows:
+        click.echo(format_row(row))
+
+
+def _print_left_out_tracks(
+    parsed_tracks: list[Track], unique_tracks: list[Track], requested_tracks: list[Track]
+) -> None:
+    """
+    List the parsed tracks that are not sent to sockseek, and why.
+
+    :param parsed_tracks: Every track read from the sources
+    :param unique_tracks: The parsed tracks without duplicates
+    :param requested_tracks: The tracks sent to sockseek
+    """
+    duplicates = [track for track in parsed_tracks if not any(track is kept for kept in unique_tracks)]
+    if duplicates:
+        click.secho(f"\n{len(duplicates)} duplicates left out (same main artist and title as an earlier track):")
+        for track in duplicates:
+            click.echo(f"  - {track.display_name}")
+    beyond_limit_count = len(unique_tracks) - len(requested_tracks)
+    if beyond_limit_count:
+        click.secho(f"\n{beyond_limit_count} tracks beyond --limit left out.", fg="yellow")
+
+
+def _print_download_plan(
+    downloader: SockseekDownloader, name: str, requested_tracks: list[Track], already_downloaded: list[Track]
+) -> None:
+    """
+    Print what is about to be done: counts, folders, preferences, VPN and the sockseek command.
+
+    :param downloader: Downloader configured with the user settings
+    :param name: Name of the batch
+    :param requested_tracks: Tracks sent to sockseek
+    :param already_downloaded: Tracks among them that the download history already holds
+    """
+    settings = downloader.settings
+    input_path = downloader.input_path_for(name)
+    formats = ", ".join(settings.preferred_formats) or "any format"
+    rows = [
+        ("Tracks sent", len(requested_tracks)),
+        ("Already downloaded", f"{len(already_downloaded)} (sockseek skips them)"),
+        ("To fetch", len(requested_tracks) - len(already_downloaded)),
+        ("Output folder", settings.output_directory),
+        ("Preferred quality", f"{formats}, >= {settings.preferred_minimum_bitrate} kbps (other files are a fallback)"),
+        ("File naming", settings.name_format),
+        ("Download history", settings.index_path),
+        ("sockseek input file", input_path),
+        ("VPN", f"required, currently {_describe_vpn(settings)}" if settings.vpn_required else "not required"),
+        ("Lossless files", _describe_conversion(settings)),
+        ("sockseek command", downloader.describe_command(input_path, requested_tracks)),
+    ]
+    click.secho("\nDownload plan", bold=True)
+    for label, value in rows:
+        click.echo(f"  {label:<21}{value}")
 
 
 def _print_report(report: DownloadReport) -> None:
     """
-    Print the outcome of a download run.
+    Print the outcome of a download run, track by track.
 
     :param report: Outcome of the run
     """
-    click.echo("")
-    click.secho(f"Downloaded:          {len(report.downloaded)}", fg="green")
-    click.echo(f"Already downloaded:  {len(report.already_downloaded)}")
-    for label, failed_tracks in (("Not found or failed", report.failed), ("Not attempted", report.not_attempted)):
-        if failed_tracks:
-            click.secho(f"{label + ':':<21}{len(failed_tracks)}", fg="red")
-            for track in failed_tracks:
-                click.echo(f"  - {track.display_name}")
+    click.secho("\nResult", bold=True)
+    click.secho(f"  Downloaded: {len(report.downloaded)}", fg="green")
+    for track in report.downloaded:
+        click.echo(f"    {track.display_name}  ->  {Path(report.saved_files.get(track, '')).name}")
+    click.echo(f"  Already downloaded by an earlier run: {len(report.already_downloaded)}")
+    for track in report.already_downloaded:
+        click.echo(f"    {track.display_name}")
+    for label, unfinished_tracks in (("Not found or failed", report.failed), ("Not finished", report.not_attempted)):
+        if unfinished_tracks:
+            click.secho(f"  {label}: {len(unfinished_tracks)}", fg="red")
+            for track in unfinished_tracks:
+                click.echo(f"    {track.display_name}")
     if report.failed or report.not_attempted:
-        click.echo("Run the same command again to retry them; finished tracks are skipped.")
+        click.echo("  Run the same command again to retry them; finished tracks are skipped.")
 
 
-def _export_tracks(tracks: list[Track], path: Path) -> None:
+def _export_tracks(exported_tracks: list[Track], path: Path) -> None:
     """
     Write tracks to a CSV file with every known detail.
 
-    :param tracks: Tracks to write
+    :param exported_tracks: Tracks to write
     :param path: File to write
     """
     with path.open("w", encoding="utf-8-sig", newline="") as file:
         writer = csv.writer(file)
         writer.writerow(["Artist", "Title", "Album", "Length", "URL"])
-        for track in tracks:
+        for track in exported_tracks:
             writer.writerow([track.artist, track.title, track.album, track.duration_seconds or "", track.url])
 
 
@@ -269,6 +468,30 @@ def _format_duration(duration_seconds: int | None) -> str:
     if not duration_seconds:
         return ""
     return f"{duration_seconds // 60}:{duration_seconds % 60:02d}"
+
+
+def _describe_conversion(settings: Settings) -> str:
+    """
+    Describe what happens to lossless downloads.
+
+    :param settings: User settings holding the conversion preferences
+    :returns: A short sentence for display
+    """
+    if not settings.convert_lossless_to_mp3:
+        return "kept as downloaded"
+    return f"converted to MP3 {settings.mp3_bitrate} kbps with {settings.ffmpeg_executable}, originals deleted"
+
+
+def _describe_vpn(settings: Settings) -> str:
+    """
+    Describe the current state of the VPN.
+
+    :param settings: User settings holding the path of the VPN command line tool
+    :returns: The connection state with its details, or a note that the VPN client is not installed
+    """
+    if not settings.piactl_executable.is_file():
+        return "VPN client not found"
+    return VpnGuard(settings.piactl_executable).describe()
 
 
 def _sockseek_version(settings: Settings) -> str | None:

@@ -23,6 +23,8 @@ src/tandem_dj/
   models.py          Track, TrackCollection
   text_cleaning.py   upload title cleaning and "Artist - Title" splitting (shared by YouTube, SoundCloud, text)
   sockseek.py        SockseekDownloader: CSV input file, command line, report from the sockseek index
+  vpn.py             VpnGuard: context manager around Private Internet Access (piactl)
+  conversion.py      convert_to_mp3(): lossless files to MP3 through ffmpeg
   sources/
     __init__.py      read_tracks() / read_track_lines(): the only entry points; WEBSITE_SOURCES registry
     base.py          TrackSource abstract class, SourceError
@@ -41,9 +43,20 @@ data/                runtime state (untracked): sockseek_index.csv, inputs/*.csv
 1. `read_tracks(reference)` picks the first `TrackSource` in `WEBSITE_SOURCES` whose `accepts()` matches, otherwise
    treats the reference as a text file path, otherwise as one literal `Artist - Title`. It returns a
    `TrackCollection`. Text lines that are links are resolved recursively.
-2. `SockseekDownloader.download()` removes duplicates, writes `data/inputs/<name>.csv`
+2. The tracks are printed exactly as sent to sockseek (`sockseek.input_row()` is the single source of both the
+   printed table and the input file), with the download plan.
+3. Inside a `VpnGuard`, `SockseekDownloader.download()` removes duplicates, writes `data/inputs/<name>.csv`
    (columns `Artist,Title,Album[,Length]`), runs sockseek once on it with inherited stdio, then classifies each
-   track from `data/sockseek_index.csv`.
+   track from `data/sockseek_index.csv`. `keep_running=guard.is_connected` stops sockseek if the VPN drops.
+4. After the VPN is off again, lossless files among `report.saved_files` are converted to MP3.
+
+## Standing requirements from the user
+
+- **Never contact the Soulseek network outside the VPN guard**, including while testing. Use sockseek's offline
+  mock mode for tests. `[vpn] required` defaults to `true` even when the section is missing.
+- **Show what is really used**: every run prints the exact artist and title sent to sockseek, the plan, and the
+  file each track was saved as. Keep output informative when adding features.
+- **MP3 is the wanted format**; lossless downloads are converted.
 
 ### Adding a website
 
@@ -54,8 +67,8 @@ real response structure to the conversion functions.
 ### Adding a CLI feature
 
 Add a `@main.command()` in `cli.py` that stays thin: argument handling and printing only, logic in its own module.
-Errors meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `ConfigurationError`) converted
-to `click.ClickException` in `cli.py`.
+Errors meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `ConfigurationError`,
+`VpnError`, `ConversionError`) converted to `click.ClickException` or printed as warnings in `cli.py`.
 
 ## Things that are not obvious
 
@@ -68,6 +81,17 @@ to `click.ClickException` in `cli.py`.
 - **Only the first artist is written to the sockseek input**, because a Soulseek search needs every word to match a
   file path. `Track.artists` keeps them all.
 - **sockseek exits with code 1 when some tracks fail**; that is a normal partial result, not a crash.
+- **Index state `0`** marks a track sockseek was still working on when it was stopped; it is reported as
+  "not finished", not as failed.
+- **PIA (`piactl`)**: `get connectionstate` says `Connected` a few seconds before traffic is really routed, and
+  `get pubip` is the *real* address even while connected (`vpnip` is the VPN one, `Unknown` for ~8 s). So
+  `VpnGuard` confirms with an outside lookup (`ADDRESS_LOOKUP_URLS`) that the visible address differs from `pubip`
+  before letting the download start, and fails closed. `piactl connect` needs the PIA window open or
+  `piactl background enable`, which the guard runs when a first attempt is refused.
+- **Two sockseek processes must not log in at once** with the same Soulseek account: the second login kicks the
+  first.
+- **Conversion** deletes the lossless original only after ffmpeg produced a non-empty MP3, and never overwrites an
+  existing MP3. The sockseek index keeps the old `.flac` path, which is harmless: skipping does not check files.
 - **Offline testing**: sockseek's `--mock-files-dir <folder> --mock-files-no-read-tags` replaces the Soulseek
   network with local files. `tests/test_sockseek.py` uses it through `extra_arguments`.
 - **Spotify**: the embed page (`open.spotify.com/embed/<kind>/<id>`) holds an anonymous access token and at most

@@ -13,6 +13,7 @@ EXAMPLE_CONFIG_PATH = PROJECT_ROOT / "config.example.toml"
 DEFAULT_NAME_FORMAT = "{artist( - )title|slsk-filename}"
 DEFAULT_SOCKSEEK_EXECUTABLE = "vendor/sockseek/sockseek.exe"
 DEFAULT_INDEX_PATH = "data/sockseek_index.csv"
+DEFAULT_PIACTL_EXECUTABLE = "C:/Program Files/Private Internet Access/piactl.exe"
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,11 @@ class Settings:
     :param sockseek_executable: Path of the sockseek program
     :param index_path: Path of the download history kept by sockseek
     :param extra_arguments: Extra sockseek flags appended to every run
+    :param vpn_required: Whether downloads may only run while the VPN is connected
+    :param piactl_executable: Path of the Private Internet Access command line tool
+    :param convert_lossless_to_mp3: Whether lossless downloads are converted to MP3
+    :param mp3_bitrate: Bitrate, in kbps, of converted MP3 files
+    :param ffmpeg_executable: Name or path of the ffmpeg program used for conversions
     """
 
     soulseek_username: str
@@ -40,6 +46,11 @@ class Settings:
     sockseek_executable: Path
     index_path: Path
     extra_arguments: tuple[str, ...]
+    vpn_required: bool = True
+    piactl_executable: Path = Path(DEFAULT_PIACTL_EXECUTABLE)
+    convert_lossless_to_mp3: bool = True
+    mp3_bitrate: int = 320
+    ffmpeg_executable: str = "ffmpeg"
 
 
 def load_settings(config_path: Path | None = None) -> Settings:
@@ -63,6 +74,8 @@ def load_settings(config_path: Path | None = None) -> Settings:
     soulseek = document.get("soulseek", {})
     download = document.get("download", {})
     sockseek = document.get("sockseek", {})
+    vpn = document.get("vpn", {})
+    conversion = document.get("conversion", {})
     for key in ("username", "password"):
         if not soulseek.get(key):
             raise ConfigurationError(f"{path} must define {key} in its [soulseek] section.")
@@ -79,6 +92,11 @@ def load_settings(config_path: Path | None = None) -> Settings:
         sockseek_executable=_resolve_path(sockseek.get("executable", DEFAULT_SOCKSEEK_EXECUTABLE)),
         index_path=_resolve_path(sockseek.get("index_path", DEFAULT_INDEX_PATH)),
         extra_arguments=tuple(str(argument) for argument in sockseek.get("extra_arguments", ())),
+        vpn_required=bool(vpn.get("required", True)),
+        piactl_executable=_resolve_path(vpn.get("piactl", DEFAULT_PIACTL_EXECUTABLE)),
+        convert_lossless_to_mp3=bool(conversion.get("lossless_to_mp3", True)),
+        mp3_bitrate=int(conversion.get("mp3_bitrate", 320)),
+        ffmpeg_executable=str(conversion.get("ffmpeg", "ffmpeg")),
     )
 
 

@@ -25,3 +25,18 @@ index_path = "data/sockseek_index.csv"
 
 # Extra sockseek flags appended to every run, e.g. ["--fast-search", "--search-timeout", "8000"].
 extra_arguments = []
+
+[vpn]
+# When true, downloads only run through the Private Internet Access VPN: it is connected before sockseek starts,
+# the download is stopped if the VPN drops, and the VPN is disconnected afterwards (unless it was already on).
+required = true
+piactl = "C:/Program Files/Private Internet Access/piactl.exe"
+
+[conversion]
+# When true, downloads that only exist in a lossless format (FLAC, WAV, AIFF) are converted to MP3 once the
+# download is over, keeping tags and cover art. The lossless original is deleted after a successful conversion.
+lossless_to_mp3 = true
+mp3_bitrate = 320
+
+# Name of the ffmpeg program when it is on the PATH, or its full path.
+ffmpeg = "ffmpeg"

@@ -3,6 +3,8 @@ Tests of the sockseek downloader, including an offline run of the real program a
 """
 
 import csv
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -13,7 +15,9 @@ from tandem_dj.sockseek import (
     DownloadError,
     SockseekDownloader,
     build_report,
+    find_already_downloaded,
     remove_duplicates,
+    run_while,
     write_input_file,
 )
 
@@ -47,7 +51,8 @@ def test_build_command_passes_account_folders_and_preferences(tmp_path):
     The command line ignores any global sockseek config and carries every setting explicitly.
     """
     settings = make_settings(tmp_path, preferred_formats=("flac", "mp3"), extra_arguments=("--fast-search",))
-    command = SockseekDownloader(settings).build_command(tmp_path / "input.csv", artist_is_uncertain=True)
+    unsure_track = Track(artists=("Some Uploader",), title="Some Song", artist_is_uncertain=True)
+    command = SockseekDownloader(settings).build_command(tmp_path / "input.csv", [unsure_track])
     assert command[:2] == [str(SOCKSEEK_EXECUTABLE), str(tmp_path / "input.csv")]
     assert "--no-config" in command
     for flag, value in [
@@ -122,6 +127,7 @@ def test_build_report_sorts_tracks_by_index_state(tmp_path):
         "filepath,artist,album,title,length,tracktype,state,failurereason\n"
         "D:/x/a.mp3,Daniel Avery,,Naive Response,-1,0,1,0\n"
         ",Nobody Real,,Missing Song,200,0,2,9\n"
+        ",Cut Short,,Interrupted Song,180,0,0,0\n"
         "D:/x/b.mp3,Todd Terje,,Ragysh,500,0,1,0\n"
         "D:/x/b.mp3,Todd Terje,,Ragysh,500,0,3,0\n",
         encoding="utf-8",
@@ -130,12 +136,36 @@ def test_build_report_sorts_tracks_by_index_state(tmp_path):
     failed = Track(artists=("Nobody Real",), title="Missing Song")
     already_downloaded = Track(artists=("Todd Terje",), title="Ragysh")
     not_attempted = Track(artists=("Darude",), title="Feel the Beat")
-    report = build_report([downloaded, failed, already_downloaded, not_attempted], index_path, exit_code=1)
+    interrupted = Track(artists=("Cut Short",), title="Interrupted Song")
+    requested = [downloaded, failed, already_downloaded, not_attempted, interrupted]
+    report = build_report(requested, index_path, exit_code=1)
     assert report.downloaded == [downloaded]
     assert report.failed == [failed]
     assert report.already_downloaded == [already_downloaded]
-    assert report.not_attempted == [not_attempted]
+    assert report.not_attempted == [not_attempted, interrupted]
+    assert report.saved_files == {downloaded: "D:/x/a.mp3", already_downloaded: "D:/x/b.mp3"}
     assert report.exit_code == 1
+    assert find_already_downloaded(requested, index_path) == [downloaded, already_downloaded]
+
+
+def test_run_while_stops_the_program_when_the_condition_fails():
+    """
+    A program is stopped at the first check where the condition to keep running no longer holds.
+    """
+    started = time.monotonic()
+    command = [sys.executable, "-c", "import time; time.sleep(60)"]
+    exit_code, stopped_early = run_while(command, keep_running=lambda: False, watch_interval_seconds=0.2)
+    assert stopped_early
+    assert exit_code != 0
+    assert time.monotonic() - started < 30
+
+
+def test_run_while_lets_the_program_finish():
+    """
+    A program that ends by itself reports its own exit code.
+    """
+    command = [sys.executable, "-c", "raise SystemExit(3)"]
+    assert run_while(command, keep_running=lambda: True, watch_interval_seconds=0.2) == (3, False)
 
 
 def test_missing_sockseek_is_reported(tmp_path):
@@ -168,6 +198,9 @@ def test_download_with_real_sockseek_against_local_files(tmp_path):
     assert first_report.failed == [missing]
     assert [path.name for path in settings.output_directory.iterdir()] == ["Darude - Feel the Beat.mp3"]
 
-    second_report = downloader.download([found], "Offline, test: run")
+    assert Path(first_report.saved_files[found]).name == "Darude - Feel the Beat.mp3"
+
+    second_report = downloader.download([found], "Offline, test: run", keep_running=lambda: True)
     assert second_report.already_downloaded == [found]
     assert second_report.downloaded == []
+    assert not second_report.stopped_early
