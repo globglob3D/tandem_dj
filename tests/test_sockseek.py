@@ -77,7 +77,9 @@ def test_build_command_passes_account_folders_and_preferences(tmp_path):
     """
     The command line ignores any global sockseek config and carries every setting explicitly.
     """
-    settings = make_settings(tmp_path, preferred_formats=("flac", "mp3"), extra_arguments=("--fast-search",))
+    settings = make_settings(
+        tmp_path, preferred_formats=("flac", "mp3"), extra_arguments=("--fast-search",), silent_source_seconds=20
+    )
     unsure_track = Track(artists=("Some Uploader",), title="Some Song", artist_is_uncertain=True)
     command = make_downloader(settings).build_command(tmp_path / "input.csv", [unsure_track])
     assert command[:2] == [str(SOCKSEEK_EXECUTABLE), str(tmp_path / "input.csv")]
@@ -89,6 +91,7 @@ def test_build_command_passes_account_folders_and_preferences(tmp_path):
         ("--index-path", str(tmp_path / "state" / "index.csv")),
         ("--pref-format", "flac,mp3"),
         ("--pref-min-bitrate", "320"),
+        ("--max-stale-time", "20000"),
     ]:
         assert command[command.index(flag) + 1] == value
     assert "--artist-maybe-wrong" in command

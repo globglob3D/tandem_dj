@@ -18,6 +18,8 @@ from tandem_dj.vpn import VPN_MODE_NONE, VPN_MODE_NONE_SPELLINGS, VPN_MODE_PIA
 
 DEFAULT_NAME_FORMAT = "{artist( - )title|slsk-filename}"
 DEFAULT_INDEX_PATH = "data/sockseek_index.csv"
+DEFAULT_SILENT_SOURCE_SECONDS = 30
+MINIMUM_SILENT_SOURCE_SECONDS = 5
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,7 @@ class Settings:
     :param preferred_formats: File formats to pick first when several are available
     :param preferred_minimum_bitrate: Bitrate, in kbps, below which a file is only a fallback
     :param relaxed_search: Whether tracks that are not found are searched again under simpler spellings
+    :param silent_source_seconds: Time a source may send nothing before sockseek drops it for the next one
     :param sockseek_executable: Path of the sockseek program
     :param index_path: Path of the download history kept by sockseek
     :param extra_arguments: Extra sockseek flags appended to every run
@@ -55,6 +58,7 @@ class Settings:
     convert_to_mp3: bool = True
     mp3_bitrate: int = 320
     relaxed_search: bool = True
+    silent_source_seconds: int = DEFAULT_SILENT_SOURCE_SECONDS
 
 
 def load_settings(config_path: Path | None = None) -> Settings:
@@ -99,6 +103,9 @@ def load_settings(config_path: Path | None = None) -> Settings:
         convert_to_mp3=bool(conversion.get("to_mp3", True)),
         mp3_bitrate=int(conversion.get("mp3_bitrate", 320)),
         relaxed_search=bool(download.get("relaxed_search", True)),
+        silent_source_seconds=max(
+            int(download.get("silent_source_seconds", DEFAULT_SILENT_SOURCE_SECONDS)), MINIMUM_SILENT_SOURCE_SECONDS
+        ),
     )
 
 
@@ -148,6 +155,7 @@ def save_settings(settings: Settings, config_path: Path | None = None) -> Path:
             convert_to_mp3=_boolean(settings.convert_to_mp3),
             mp3_bitrate=settings.mp3_bitrate,
             relaxed_search=_boolean(settings.relaxed_search),
+            silent_source_seconds=settings.silent_source_seconds,
         ),
         encoding="utf-8",
         newline="\n",
@@ -239,6 +247,10 @@ preferred_minimum_bitrate = {preferred_minimum_bitrate}
 # When true, tracks that are not found are searched again under simpler spellings: without accents, without
 # articles and punctuation, without decorations such as (Original Mix), and finally by title alone.
 relaxed_search = {relaxed_search}
+
+# Seconds a source may send nothing before sockseek drops it and tries the next one. A lower value leaves a
+# transfer stuck at 0 kB/s sooner; a higher one is more patient with sources that queue their uploads.
+silent_source_seconds = {silent_source_seconds}
 
 [sockseek]
 # Path of another sockseek program; empty to use the one shipped with the application.

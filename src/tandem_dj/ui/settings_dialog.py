@@ -7,7 +7,7 @@ import tkinter
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from tandem_dj.config import Settings, save_settings
+from tandem_dj.config import MINIMUM_SILENT_SOURCE_SECONDS, Settings, save_settings
 from tandem_dj.ui import theme
 from tandem_dj.vpn import VPN_MODE_NONE, VPN_MODE_PIA
 
@@ -46,6 +46,7 @@ class SettingsDialog(tkinter.Toplevel):
         self.preferred_formats = tkinter.StringVar(self, ", ".join(settings.preferred_formats))
         self.preferred_minimum_bitrate = tkinter.StringVar(self, str(settings.preferred_minimum_bitrate))
         self.relaxed_search = tkinter.BooleanVar(self, settings.relaxed_search)
+        self.silent_source_seconds = tkinter.StringVar(self, str(settings.silent_source_seconds))
         self.extra_arguments = tkinter.StringVar(self, " ".join(settings.extra_arguments))
         self.vpn_mode = tkinter.StringVar(self, settings.vpn_mode)
         self.piactl_executable = tkinter.StringVar(self, str(settings.piactl_executable))
@@ -67,6 +68,9 @@ class SettingsDialog(tkinter.Toplevel):
             form,
             "Search tracks that are not found again under simpler spellings (no accents, no punctuation, title alone)",
             self.relaxed_search,
+        )
+        self._add_entry(
+            form, "Drop a silent source after (s)", self.silent_source_seconds, hint="then the next one is tried"
         )
         self._add_entry(form, "Extra sockseek flags", self.extra_arguments, hint="space separated, optional")
         self._add_heading(form, "VPN")
@@ -200,6 +204,15 @@ class SettingsDialog(tkinter.Toplevel):
             mp3_bitrate = int(self.mp3_bitrate.get())
         except ValueError as error:
             raise ValueError("Bitrates must be whole numbers, such as 320.") from error
+        try:
+            silent_source_seconds = int(self.silent_source_seconds.get())
+        except ValueError as error:
+            raise ValueError("The time before a silent source is dropped must be a whole number of seconds.") from error
+        if silent_source_seconds < MINIMUM_SILENT_SOURCE_SECONDS:
+            raise ValueError(
+                f"A source needs at least {MINIMUM_SILENT_SOURCE_SECONDS} seconds to start sending: "
+                "raise the time before a silent source is dropped."
+            )
         return dataclasses.replace(
             self.settings,
             soulseek_username=self.username.get().strip(),
@@ -208,6 +221,7 @@ class SettingsDialog(tkinter.Toplevel):
             preferred_formats=tuple(name.strip() for name in self.preferred_formats.get().split(",") if name.strip()),
             preferred_minimum_bitrate=preferred_minimum_bitrate,
             relaxed_search=self.relaxed_search.get(),
+            silent_source_seconds=silent_source_seconds,
             extra_arguments=tuple(self.extra_arguments.get().split()),
             vpn_mode=self.vpn_mode.get(),
             piactl_executable=Path(self.piactl_executable.get().strip()),

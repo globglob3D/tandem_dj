@@ -260,6 +260,9 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
   file names come from tags or from the Soulseek uploader and cannot be matched to the playlist reliably.
   `find_already_downloaded()` returns the file of each such track; the window shows it in the `Details` column
   (`already have <file>, in <folder>`) and writes the full paths to the log file.
+- **A transfer stuck at 0 kB/s is sockseek waiting for a silent source.** It drops a source after
+  `--max-stale-time` without a state change or a byte received, then tries the next candidate. That time is
+  `Settings.silent_source_seconds` (30 by default, never under 5), editable in the settings window.
 - **Only the first artist is written to the sockseek input**, because a Soulseek search needs every word to match a
   file path. `Track.artists` keeps them all.
 - **sockseek exits with code 1 when some tracks fail**; that is a normal partial result, not a crash.

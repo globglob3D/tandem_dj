@@ -27,9 +27,22 @@ def test_settings_survive_a_save_and_load(tmp_path):
         vpn_mode=VPN_MODE_NONE,
         mp3_bitrate=256,
         relaxed_search=False,
+        silent_source_seconds=15,
     )
     path = save_settings(settings, tmp_path / "nested" / "config.toml")
     assert load_settings(path) == settings
+
+
+def test_a_source_is_given_thirty_seconds_unless_the_settings_say_otherwise(tmp_path):
+    """
+    A settings file written before the setting existed drops a silent source after 30 seconds, and a value too
+    low for any source to start sending is raised to the minimum.
+    """
+    path = tmp_path / "config.toml"
+    path.write_text(MINIMAL_SETTINGS, encoding="utf-8")
+    assert load_settings(path).silent_source_seconds == 30
+    path.write_text(MINIMAL_SETTINGS + "silent_source_seconds = 1\n", encoding="utf-8")
+    assert load_settings(path).silent_source_seconds == 5
 
 
 def test_downloads_go_through_the_vpn_unless_the_settings_clearly_say_otherwise(tmp_path):

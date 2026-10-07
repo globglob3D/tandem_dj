@@ -38,6 +38,7 @@ INDEX_STATE_FAILED = "2"
 INDEX_STATE_ALREADY_DOWNLOADED = "3"
 PASSWORD_PLACEHOLDER = "********"
 WATCH_INTERVAL_SECONDS = 5
+MILLISECONDS_PER_SECOND = 1000
 
 
 class SockseekDownloader:
@@ -197,6 +198,8 @@ class SockseekDownloader:
             str(index_path or settings.index_path),
             "--pref-min-bitrate",
             str(settings.preferred_minimum_bitrate),
+            "--max-stale-time",
+            str(settings.silent_source_seconds * MILLISECONDS_PER_SECOND),
         ]
         if settings.preferred_formats:
             command += ["--pref-format", ",".join(settings.preferred_formats)]

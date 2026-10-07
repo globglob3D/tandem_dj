@@ -177,6 +177,9 @@ Everything the application writes lives in one folder per user:
 
 Settings worth knowing, all in the **Settings...** dialog:
 
+- **Drop a silent source after (s)**: how long a person sharing a file may send nothing before sockseek gives up
+  on them and asks the next one. It is 30 seconds by default. Lower it if transfers often sit at 0 kB/s; raise it
+  if tracks fail although people share them, since some sources queue their uploads before sending.
 - **Extra sockseek flags** are passed to every run: any flag from `sockseek --help`, for example `--fast-search`
   or `--desperate`.
 - **VPN**: see [VPN](#vpn) below.

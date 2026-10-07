@@ -326,6 +326,7 @@ def test_settings_dialog_saves_the_edited_settings(window):
     dialog.username.set("another-user")
     dialog.preferred_formats.set("flac, mp3")
     dialog.vpn_mode.set(VPN_MODE_PIA)
+    dialog.silent_source_seconds.set("12")
     dialog._on_save()
     saved_settings = load_settings(window.config_path)
     assert dialog.saved_settings == saved_settings
@@ -333,3 +334,4 @@ def test_settings_dialog_saves_the_edited_settings(window):
     assert saved_settings.preferred_formats == ("flac", "mp3")
     assert saved_settings.vpn_mode == VPN_MODE_PIA
     assert saved_settings.name_format == "{sartist} - {stitle}"
+    assert saved_settings.silent_source_seconds == 12
