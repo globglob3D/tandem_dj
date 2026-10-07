@@ -50,6 +50,7 @@ def run_download(
     settings: Settings,
     tracks: Sequence[Track],
     name: str,
+    batch_directory: Path,
     notify: Notify,
     confirm: Confirm,
     on_output_line: OutputLineReceiver | None = None,
@@ -57,13 +58,16 @@ def run_download(
     on_search_variants: SearchVariantsReceiver | None = None,
 ) -> DownloadReport:
     """
-    Download tracks with the protection chosen in the settings, then convert the files that are not MP3.
+    Download tracks into the folder of their batch with the protection chosen in the settings, then convert the
+    files that are not MP3.
 
     Tracks that are not found are searched again under simpler spellings, when the settings allow it.
 
     :param settings: User settings
     :param tracks: Tracks to download
     :param name: Name of the batch, such as a playlist title
+    :param batch_directory: Folder the files of this batch are saved in, see
+        :func:`~tandem_dj.batch_folder.batch_folder_name`; it does not exist afterwards when nothing was saved
     :param notify: Receiver of progress messages, called with the message and one of the ``LEVEL_`` constants
     :param confirm: Asks the user a yes or no question and returns the answer; used before every download that
         Private Internet Access does not protect
@@ -71,11 +75,11 @@ def run_download(
     :param keep_running: Extra condition checked every few seconds; sockseek is stopped once it returns ``False``
     :param on_search_variants: Told which spelling each track is searched under, before every further search
     :returns: The outcome of every requested track, with converted file names
-    :raises DownloadError: If sockseek or the output folder is not available
+    :raises DownloadError: If sockseek or the download folder is not available
     :raises VpnError: If the VPN cannot be connected or confirmed
     :raises DownloadCancelled: If the user answered no to the question asked before the download
     """
-    downloader = SockseekDownloader(settings)
+    downloader = SockseekDownloader(settings, batch_directory)
     downloader.check_ready()
 
     def download(may_continue: Callable[[], bool] | None) -> DownloadReport:

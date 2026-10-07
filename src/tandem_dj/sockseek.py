@@ -5,6 +5,7 @@ Tracks are handed to sockseek as a CSV file. Sockseek records the outcome of eve
 doubles as a download history: tracks it already fetched are skipped on later runs, wherever the files are now.
 """
 
+import contextlib
 import csv
 import re
 import shutil
@@ -39,13 +40,16 @@ WATCH_INTERVAL_SECONDS = 5
 
 class SockseekDownloader:
     """
-    Downloads tracks from Soulseek by running sockseek.
+    Downloads one batch of tracks from Soulseek by running sockseek.
 
     :param settings: User settings holding the Soulseek account, folders and preferences
+    :param batch_directory: Folder the files of this batch are saved in, normally a new folder inside the download
+        folder; it is created for each sockseek run and deleted again when nothing was saved in it
     """
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, batch_directory: Path) -> None:
         self.settings = settings
+        self.batch_directory = batch_directory
 
     def download(
         self,
@@ -55,22 +59,24 @@ class SockseekDownloader:
         on_output_line: Callable[[str], None] | None = None,
     ) -> "DownloadReport":
         """
-        Download tracks into the output folder and report what happened to each of them.
+        Download tracks into the folder of the batch and report what happened to each of them.
 
         With ``on_output_line``, sockseek output is handed over line by line and includes JSON progress events.
         Without it, sockseek writes to the standard output of the application, if it has one.
 
         Before the run, leftovers of interrupted runs are removed from the index; after it, the partial files
-        sockseek leaves in its staging folder inside the output folder are deleted.
+        sockseek leaves in its staging folder inside the folder of the batch are deleted, and so is that folder
+        when nothing was saved in it.
 
         :param tracks: Tracks to download; duplicates are only requested once
         :param name: Name of the batch, used to name the generated sockseek input file
         :param keep_running: Condition checked every few seconds; sockseek is stopped as soon as it returns ``False``
         :param on_output_line: Receiver of every line sockseek prints, called from a background thread
         :returns: The outcome of every requested track
-        :raises DownloadError: If sockseek or the output folder is not available
+        :raises DownloadError: If sockseek, the download folder or the folder of the batch is not available
         """
         self.check_ready()
+        self._create_batch_directory()
         requested_tracks = remove_duplicates(tracks)
         input_path = self.input_path_for(name)
         write_input_file(requested_tracks, input_path)
@@ -78,7 +84,7 @@ class SockseekDownloader:
         previously_downloaded = find_already_downloaded(requested_tracks, self.settings.index_path)
         command = self.build_command(input_path, requested_tracks, emit_progress_events=on_output_line is not None)
         exit_code, stopped_early = run_while(command, keep_running, on_output_line=on_output_line)
-        shutil.rmtree(self.settings.output_directory / STAGING_DIRECTORY_NAME, ignore_errors=True)
+        self._tidy_batch_directory()
         report = build_report(requested_tracks, self.settings.index_path, exit_code, previously_downloaded)
         report.stopped_early = stopped_early
         return report
@@ -102,9 +108,10 @@ class SockseekDownloader:
         :param keep_running: Condition checked every few seconds; sockseek is stopped once it returns ``False``
         :param on_output_line: Receiver of every line sockseek prints, called from a background thread
         :returns: The file each found track was saved to, and whether sockseek was stopped early
-        :raises DownloadError: If sockseek or the output folder is not available
+        :raises DownloadError: If sockseek, the download folder or the folder of the batch is not available
         """
         self.check_ready()
+        self._create_batch_directory()
         input_path = self.input_path_for(f"{name} {RELAXED_INPUT_SUFFIX}")
         variant_index_path = input_path.with_suffix(RELAXED_INDEX_SUFFIX)
         variant_index_path.unlink(missing_ok=True)
@@ -117,7 +124,7 @@ class SockseekDownloader:
             input_path, emit_progress_events=on_output_line is not None, index_path=variant_index_path
         )
         _, stopped_early = run_while(command, keep_running, on_output_line=on_output_line)
-        shutil.rmtree(self.settings.output_directory / STAGING_DIRECTORY_NAME, ignore_errors=True)
+        self._tidy_batch_directory()
         entries = read_index(variant_index_path)
         saved_files = {
             track: entry.file_path
@@ -130,9 +137,9 @@ class SockseekDownloader:
 
     def check_ready(self) -> None:
         """
-        Make sure sockseek can run and has somewhere to save files.
+        Make sure sockseek can run and that the download folder, which receives the folder of the batch, exists.
 
-        :raises DownloadError: If sockseek is missing or the output folder cannot be used
+        :raises DownloadError: If sockseek is missing or the download folder cannot be used
         """
         if not self.settings.sockseek_executable.is_file():
             raise DownloadError(f"sockseek was not found at {self.settings.sockseek_executable}.")
@@ -181,7 +188,7 @@ class SockseekDownloader:
             "--pass",
             settings.soulseek_password,
             "--output-dir",
-            str(settings.output_directory),
+            str(self.batch_directory),
             "--name-format",
             settings.name_format,
             "--index-path",
@@ -209,13 +216,32 @@ class SockseekDownloader:
         command[command.index("--pass") + 1] = PASSWORD_PLACEHOLDER
         return subprocess.list2cmdline(command)
 
+    def _create_batch_directory(self) -> None:
+        """
+        Create the folder of the batch, which sockseek is about to save into.
+
+        :raises DownloadError: If the folder cannot be created
+        """
+        try:
+            self.batch_directory.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise DownloadError(f"The folder {self.batch_directory} could not be created: {error}") from error
+
+    def _tidy_batch_directory(self) -> None:
+        """
+        Delete the partial files sockseek leaves in its staging folder, then the folder of the batch if it is empty.
+        """
+        shutil.rmtree(self.batch_directory / STAGING_DIRECTORY_NAME, ignore_errors=True)
+        with contextlib.suppress(OSError):
+            self.batch_directory.rmdir()
+
 
 @dataclass
 class DownloadReport:
     """
     What happened to every track of a download run.
 
-    :param downloaded: Tracks fetched during a run and saved to the output folder
+    :param downloaded: Tracks fetched during a run and saved to the folder of the batch
     :param already_downloaded: Tracks skipped because the download history already holds them
     :param failed: Tracks sockseek could not find or could not finish downloading
     :param not_attempted: Tracks sockseek did not finish with, typically because the run was interrupted

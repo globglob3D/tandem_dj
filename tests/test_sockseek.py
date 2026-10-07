@@ -26,6 +26,7 @@ from tandem_dj.sockseek import (
 )
 
 SOCKSEEK_EXECUTABLE = bundled_sockseek()
+BATCH_FOLDER_NAME = "Soirée d'été - spotify - 2026-10-07 21-45-03"
 
 
 def make_settings(tmp_path: Path, **overrides) -> Settings:
@@ -50,19 +51,29 @@ def make_settings(tmp_path: Path, **overrides) -> Settings:
     return Settings(**(values | overrides))
 
 
+def make_downloader(settings: Settings) -> SockseekDownloader:
+    """
+    Build a downloader saving into a batch folder whose name holds spaces, accents and an apostrophe.
+
+    :param settings: User settings
+    :returns: The downloader
+    """
+    return SockseekDownloader(settings, settings.output_directory / BATCH_FOLDER_NAME)
+
+
 def test_build_command_passes_account_folders_and_preferences(tmp_path):
     """
     The command line ignores any global sockseek config and carries every setting explicitly.
     """
     settings = make_settings(tmp_path, preferred_formats=("flac", "mp3"), extra_arguments=("--fast-search",))
     unsure_track = Track(artists=("Some Uploader",), title="Some Song", artist_is_uncertain=True)
-    command = SockseekDownloader(settings).build_command(tmp_path / "input.csv", [unsure_track])
+    command = make_downloader(settings).build_command(tmp_path / "input.csv", [unsure_track])
     assert command[:2] == [str(SOCKSEEK_EXECUTABLE), str(tmp_path / "input.csv")]
     assert "--no-config" in command
     for flag, value in [
         ("--user", "tester"),
         ("--pass", "secret-password"),
-        ("--output-dir", str(tmp_path / "output")),
+        ("--output-dir", str(tmp_path / "output" / BATCH_FOLDER_NAME)),
         ("--index-path", str(tmp_path / "state" / "index.csv")),
         ("--pref-format", "flac,mp3"),
         ("--pref-min-bitrate", "320"),
@@ -76,7 +87,7 @@ def test_describe_command_hides_the_password(tmp_path):
     """
     The displayable command never shows the Soulseek password.
     """
-    description = SockseekDownloader(make_settings(tmp_path)).describe_command(tmp_path / "input.csv")
+    description = make_downloader(make_settings(tmp_path)).describe_command(tmp_path / "input.csv")
     assert "secret-password" not in description
     assert "--pass ********" in description
 
@@ -189,14 +200,14 @@ def test_missing_sockseek_is_reported(tmp_path):
     """
     settings = make_settings(tmp_path, sockseek_executable=tmp_path / "missing.exe")
     with pytest.raises(DownloadError, match="sockseek was not found"):
-        SockseekDownloader(settings).download([Track(artists=("Darude",), title="Feel the Beat")], "test")
+        make_downloader(settings).download([Track(artists=("Darude",), title="Feel the Beat")], "test")
 
 
 @pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file(), reason="sockseek is not installed in vendor/sockseek")
 def test_download_with_real_sockseek_against_local_files(tmp_path):
     """
     Sockseek, pointed at a folder of local files instead of the Soulseek network, saves a found track flat in the
-    output folder, records a missing one as failed and skips the found one on the next run.
+    folder of the batch, records a missing one as failed and skips the found one on the next run.
     """
     shared_files = tmp_path / "shared"
     shared_files.mkdir()
@@ -206,13 +217,14 @@ def test_download_with_real_sockseek_against_local_files(tmp_path):
     )
     found = Track(artists=("Darude",), title="Feel the Beat")
     missing = Track(artists=("Nobody Real",), title="Missing Song")
-    downloader = SockseekDownloader(settings)
+    downloader = make_downloader(settings)
 
     first_report = downloader.download([found, missing], "Offline, test: run")
     assert first_report.downloaded == [found]
     assert first_report.failed == [missing]
-    assert [path.name for path in settings.output_directory.iterdir()] == ["Darude - Feel the Beat.mp3"]
-
+    assert [path.name for path in settings.output_directory.iterdir()] == [BATCH_FOLDER_NAME]
+    assert [path.name for path in downloader.batch_directory.iterdir()] == ["Darude - Feel the Beat.mp3"]
+    assert Path(first_report.saved_files[found]).parent == downloader.batch_directory
     assert Path(first_report.saved_files[found]).name == "Darude - Feel the Beat.mp3"
 
     second_report = downloader.download([found], "Offline, test: run", keep_running=lambda: True)
@@ -256,7 +268,8 @@ def test_repair_index_keeps_the_most_conclusive_row_per_track(tmp_path):
 def test_interrupted_run_leftovers_do_not_cause_a_second_download(tmp_path):
     """
     A stale unfinished row placed after a success row, which sockseek alone would act on, no longer makes it
-    download the track again, and partial files left in the staging folder are cleaned up.
+    download the track again, and partial files left in the staging folder are cleaned up. The folder of a
+    batch that saved nothing is deleted.
     """
     shared_files = tmp_path / "shared"
     shared_files.mkdir()
@@ -265,22 +278,24 @@ def test_interrupted_run_leftovers_do_not_cause_a_second_download(tmp_path):
         tmp_path, extra_arguments=("--mock-files-dir", str(shared_files), "--mock-files-no-read-tags", "--no-progress")
     )
     track = Track(artists=("Darude",), title="Feel the Beat")
-    downloader = SockseekDownloader(settings)
-    partial_file = settings.output_directory / ".sockseek-staging" / "abc" / "song.mp3.incomplete"
+    downloader = make_downloader(settings)
+    partial_file = downloader.batch_directory / ".sockseek-staging" / "abc" / "song.mp3.incomplete"
     partial_file.parent.mkdir(parents=True)
     partial_file.write_bytes(b"half a song")
     assert downloader.download([track], "leftovers").downloaded == [track]
-    assert not (settings.output_directory / ".sockseek-staging").exists()
+    assert not (downloader.batch_directory / ".sockseek-staging").exists()
 
     with settings.index_path.open("a", encoding="utf-8", newline="") as file:
         file.write(",Darude,,Feel the Beat,-1,0,0,0\n")
-    saved_file = settings.output_directory / "Darude - Feel the Beat.mp3"
+    saved_file = downloader.batch_directory / "Darude - Feel the Beat.mp3"
     saved_file.unlink()
 
     report = downloader.download([track], "leftovers")
     assert report.already_downloaded == [track]
     assert report.downloaded == []
     assert not saved_file.exists()
+    assert not downloader.batch_directory.exists()
+    assert settings.output_directory.is_dir()
 
 
 def test_record_downloads_updates_the_rows_of_a_track_or_adds_one(tmp_path):
@@ -327,8 +342,9 @@ def test_track_found_under_another_spelling_is_remembered_under_its_real_name(tm
     )
     track = Track(artists=("Sköne",), title="L'arrêt sur image")
     hopeless = Track(artists=("Nobody Real",), title="Missing Song")
-    downloader = SockseekDownloader(settings)
+    downloader = make_downloader(settings)
     assert downloader.download([track, hopeless], "French list").failed == [track, hopeless]
+    assert not downloader.batch_directory.exists()
 
     variants = {
         track: SearchVariant("Skone", "arret sur image", "without accents, articles and punctuation"),
@@ -338,7 +354,7 @@ def test_track_found_under_another_spelling_is_remembered_under_its_real_name(tm
     assert not stopped_early
     assert list(saved_files) == [track]
     assert Path(saved_files[track]).is_file()
-    assert Path(saved_files[track]).parent == settings.output_directory
+    assert Path(saved_files[track]).parent == downloader.batch_directory
 
     index_text = settings.index_path.read_text(encoding="utf-8-sig")
     assert "L'arrêt sur image" in index_text

@@ -1,7 +1,8 @@
 # Tandem DJ
 
 A window for managing DJ music. It reads track lists from Spotify, YouTube and SoundCloud (or from what you type)
-and batch-downloads the tracks from Soulseek as MP3 files, straight onto the USB key.
+and batch-downloads the tracks from Soulseek as MP3 files, straight onto the USB key, each download in a folder
+named after its playlist.
 
 - For everyone: [Installing](#installing), [Using it](#using-it), [When a track is not found](#when-a-track-is-not-found),
   [When something goes wrong](#when-something-goes-wrong), [Where things are kept](#where-things-are-kept),
@@ -48,7 +49,7 @@ To update, install the new version over the old one. Settings and download histo
 3. **Download** connects the VPN, then follows every track live: status (waiting, searching, downloading,
    downloaded, failed), a progress bar, the amount received, the speed and the time left, the peer and file it comes
    from, and finally the name it was saved as. The bar under the table shows the overall count, total speed and a
-   rough estimate of the time left for the whole list.
+   rough estimate of the time left for the whole list. The log names the folder the download is saved in.
 4. **Stop** ends the download early; the VPN is disconnected as usual and a later Download resumes.
 5. **Settings...** edits everything: Soulseek account, download folder, preferred quality, VPN, conversion.
 
@@ -57,23 +58,43 @@ What a download does, in order:
 1. **The VPN is connected** (Private Internet Access). The download only starts once an outside service confirms
    that the internet no longer sees your real address. If the VPN drops, sockseek is stopped within seconds.
    Other VPN choices are described under [VPN](#vpn).
-2. **sockseek downloads** the tracks. Only the first artist of a track is searched for (a Soulseek search needs
-   every word to match a file path); the others appear in the notes column.
+2. **sockseek downloads** the tracks into a new folder (see
+   [Where the files go](#where-the-files-go)). Only the first artist of a track is searched for (a Soulseek search
+   needs every word to match a file path); the others appear in the notes column.
 3. **Tracks that were not found are searched again under simpler spellings** (see
    [When a track is not found](#when-a-track-is-not-found)).
 4. **The VPN is disconnected again**, unless it was already on before the run.
 5. **Other formats are converted to MP3**: when a track only exists as FLAC, WAV, AIFF, M4A, OGG, Opus or another
    format, it is converted to 320 kbps MP3 with its tags and cover art, and the original is deleted.
-6. **The result is listed**: each downloaded track with the file it was saved as, then what was not found.
+6. **The result is listed**: each downloaded track with the file it was saved as, then what was not found, then
+   the folder holding the files.
+
+### Where the files go
+
+Every download gets a new folder inside the download folder chosen in the settings, so two playlists never mix:
+
+| What was pasted | Folder of the download |
+| --- | --- |
+| A Spotify, YouTube or SoundCloud link | `Son 2 Teuf - spotify - 2026-10-07 21-45-03`: the name of the playlist, album or track, the website, the date and time |
+| A link whose name could not be read | `spotify - 2026-10-07 21-45-03` |
+| The path of a text file, such as `my set.txt` | `my set - 2026-10-07 21-45-03` |
+| Tracks typed by hand, or several links at once | `2026-10-07 21-45-03` |
+
+- The date and time are those of the click on **Download**, so downloading the same playlist twice gives two
+  folders.
+- Characters a folder name cannot hold (`/ \ : * ? " < > |`) become spaces, and a very long playlist name is cut.
+- Inside the folder, files are named `Artist - Title.mp3` from their tags, without subfolders.
+- A track downloaded earlier is not fetched again (see below), so it stays in the folder of the download that
+  fetched it. The new folder holds only what is new, and no folder is created when nothing new was saved.
 
 Good to know:
 
-- Files land flat in the download folder, named `Artist - Title.mp3` from their tags.
 - 320 kbps MP3 is preferred; anything else is only a fallback. A file must be within 3 seconds of the expected
   length, which keeps the right version of a track.
 - sockseek shares no files, so nothing is ever uploaded from this computer.
 - Stopping a download midway is safe: finished tracks stay recorded, the next run picks up the rest, and the
-  partial files sockseek leaves in `.sockseek-staging` inside the download folder are deleted after every run.
+  partial files sockseek leaves in `.sockseek-staging` inside the folder of the download are deleted after every
+  run.
 - **Downloading the same list again only fetches what is new.** Every outcome is recorded in the download history,
   so a track is fetched once even if you later move the file off the USB key. Tracks that failed are retried on the
   next run.
@@ -119,6 +140,7 @@ Common situations:
 | "Private Internet Access was not found" | You have no PIA, or it is installed elsewhere: pick another [VPN](#vpn) choice in **Settings...**, or fix the path of `piactl` there. |
 | "The VPN did not connect" | Open Private Internet Access and check that you are logged in. |
 | "The output folder ... is not available" | The USB key is not plugged in, or the download folder no longer exists: pick it again in **Settings...**. |
+| A playlist folder holds fewer tracks than the playlist | The others were downloaded before and sit in the folder of that earlier download; the table marks them `Already downloaded`. To fetch one again, delete its line from the download history (see [Where things are kept](#where-things-are-kept)). |
 | Every track fails at once | The Soulseek user name or password is wrong, or the same account is logged in elsewhere (a second login kicks the first). |
 | A link gives an error but worked before | The website changed. Install a newer Tandem DJ; meanwhile, paste the tracks as `Artist - Title` lines. |
 | Tracks marked "Not finished" | The download was stopped or the VPN dropped: click **Download** again, finished tracks are skipped. |

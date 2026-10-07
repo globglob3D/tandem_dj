@@ -7,10 +7,12 @@ import queue
 import sys
 import threading
 import tkinter
+from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
 from types import TracebackType
 
+from tandem_dj.batch_folder import batch_folder_name
 from tandem_dj.config import ConfigurationError, Settings, default_settings, load_settings
 from tandem_dj.diagnostics import describe_setup
 from tandem_dj.logs import current_log_path, hide_secret, write_error_log, write_log
@@ -210,7 +212,10 @@ class MainWindow(tkinter.Tk):
             self._log(str(error), LEVEL_WARNING)
             self.after(200, self._on_settings)
             return
-        self._log(f"Settings loaded. Downloads go to {self.settings.output_directory}", LEVEL_INFORMATION)
+        self._log(
+            f"Settings loaded. Every download gets a folder of its own inside {self.settings.output_directory}",
+            LEVEL_INFORMATION,
+        )
         self._log_setup()
         self._show_vpn_state()
 
@@ -392,16 +397,19 @@ class MainWindow(tkinter.Tk):
 
     def _download(self, settings: Settings) -> None:
         """
-        Download the read tracks and hand the outcome to the window. Runs in the background thread.
+        Download the read tracks into a new folder and hand the outcome to the window. Runs in the background
+        thread.
 
         :param settings: Settings in use
-        :raises DownloadError: If sockseek or the output folder is not available
+        :raises DownloadError: If sockseek or the download folder is not available
         :raises VpnError: If the VPN cannot be connected or confirmed
         :raises DownloadCancelled: If the user answered no to the question asked before the download
         """
         tracker = ProgressTracker(self.requested_tracks)
         self.messages.put(("tracker", tracker))
-        downloader = SockseekDownloader(settings)
+        batch_directory = settings.output_directory / batch_folder_name(self.collection, datetime.now())
+        self._log(f"This download is saved in a folder of its own: {batch_directory}", LEVEL_INFORMATION)
+        downloader = SockseekDownloader(settings, batch_directory)
         input_path = downloader.input_path_for(self.collection.display_name)
         self._log(
             f"sockseek command: {downloader.describe_command(input_path, self.requested_tracks)}", LEVEL_INFORMATION
@@ -421,13 +429,14 @@ class MainWindow(tkinter.Tk):
             settings,
             self.requested_tracks,
             self.collection.display_name,
+            batch_directory,
             notify=self._log,
             confirm=self._confirm,
             on_output_line=handle_output_line,
             keep_running=lambda: not self.stop_requested.is_set(),
             on_search_variants=tracker.follow_variants,
         )
-        self.messages.put(("finished", report))
+        self.messages.put(("finished", report, batch_directory))
 
     def _confirm(self, question: str) -> bool:
         """
@@ -498,7 +507,7 @@ class MainWindow(tkinter.Tk):
         elif kind == "tracker":
             self.tracker = message[1]
         elif kind == "finished":
-            self._show_report(message[1])
+            self._show_report(message[1], message[2])
         elif kind == "error":
             messagebox.showerror(WINDOW_TITLE, message[1], parent=self)
         elif kind == "confirm":
@@ -617,11 +626,13 @@ class MainWindow(tkinter.Tk):
         self.table.set(row, "detail", detail or (entry.detail if entry is not None else ""))
         self.table.item(row, tags=(status,))
 
-    def _show_report(self, report: DownloadReport) -> None:
+    def _show_report(self, report: DownloadReport, batch_directory: Path) -> None:
         """
-        Show the final outcome of a download: the file each track was saved as, and what is missing.
+        Show the final outcome of a download: the file each track was saved as, the folder holding them, and what
+        is missing.
 
         :param report: Outcome of the run
+        :param batch_directory: Folder the files of this download were saved in; missing when nothing was saved
         """
         if self.tracker is not None:
             self._show_progress()
@@ -667,6 +678,10 @@ class MainWindow(tkinter.Tk):
         ):
             for track in unfinished_tracks:
                 self._log(f"  {label}: {track.display_name}", LEVEL_WARNING)
+        if batch_directory.is_dir():
+            self._log(f"The files of this download are in {batch_directory}", LEVEL_SUCCESS)
+        else:
+            self._log("Nothing new was saved, so no folder was created for this download.", LEVEL_INFORMATION)
 
     def _set_busy(self, is_busy: bool, downloading: bool = False) -> None:
         """

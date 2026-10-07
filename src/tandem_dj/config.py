@@ -27,7 +27,7 @@ class Settings:
 
     :param soulseek_username: Soulseek account name
     :param soulseek_password: Soulseek account password
-    :param output_directory: Folder that receives the downloaded files
+    :param output_directory: Download folder, inside which every batch of downloads gets a folder of its own
     :param name_format: File naming pattern, in sockseek's ``--name-format`` syntax
     :param preferred_formats: File formats to pick first when several are available
     :param preferred_minimum_bitrate: Bitrate, in kbps, below which a file is only a fallback
@@ -228,7 +228,8 @@ username = {username}
 password = {password}
 
 [download]
-# Folder that receives the downloaded files, directly and without subfolders.
+# Download folder. Every download gets a new folder inside it, named after the playlist, the website it was
+# read from, and the date and time.
 output_directory = {output_directory}
 
 # File naming, in sockseek's --name-format syntax (described by "sockseek --help name-format").

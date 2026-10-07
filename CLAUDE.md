@@ -31,6 +31,7 @@ src/tandem_dj/
   logs.py            one log file per launch, secrets masked, uncaught exceptions of every thread recorded
   diagnostics.py     describe_setup(): the description of the setup written at the top of every log
   workflow.py        run_download(): VPN + sockseek + conversion
+  batch_folder.py    batch_folder_name(): the folder of one download, named after playlist, website and time
   progress.py        ProgressTracker: per-track live state rebuilt from sockseek's JSON progress events
   ui/
     main_window.py   MainWindow (tkinter): input box, track table, summary bar, log pane
@@ -78,8 +79,9 @@ macOS. It holds `config.toml` (with the Soulseek password), `data/sockseek_index
 2. The tracks are shown exactly as sent to sockseek (`sockseek.input_row()` is the single source of both the
    table and the input file).
 3. Inside a `VpnGuard`, `SockseekDownloader.download()` removes duplicates, writes `data/inputs/<name>.csv`
-   (columns `Artist,Title,Album[,Length]`), runs sockseek once on it, then classifies each track from
-   `data/sockseek_index.csv`. `keep_running=guard.is_connected` stops sockseek if the VPN drops.
+   (columns `Artist,Title,Album[,Length]`), runs sockseek once on it with the folder of the batch as its output
+   folder (see "Batch folders" below), then classifies each track from `data/sockseek_index.csv`.
+   `keep_running=guard.is_connected` stops sockseek if the VPN drops.
 4. Still inside the VPN protection, `search_failed_tracks_again()` runs up to four more sockseek passes on the
    tracks in `report.failed`, each under its next `SearchVariant` (see "Relaxed search" below).
 5. After the VPN is off again, files among `report.saved_files` that are not MP3 are converted to MP3.
@@ -123,6 +125,25 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 - To check the window by eye, drive `MainWindow` against a temporary settings file with
   `extra_arguments = ("--mock-files-dir", <folder>, "--mock-files-slow")` and `vpn_mode = "none"`.
 - `tests/test_ui.py` shares one hidden window per module: starting Tk several times in a process fails at random.
+
+### Batch folders
+
+- Every click on Download saves into a new folder inside `Settings.output_directory`. The window computes it once,
+  in `MainWindow._download()`, as `output_directory / batch_folder_name(collection, datetime.now())`, logs it, and
+  hands it to `run_download()`, which gives it to the `SockseekDownloader` of that batch. The relaxed search rounds
+  use the same downloader, so they save into the same folder.
+- `batch_folder_name()` gives `<playlist name> - <website> - <YYYY-MM-DD HH-MM-SS>`. The name is left out when
+  `TrackCollection.name` is empty, the website when the origin is `TEXT_ORIGIN`. The user asked for exactly this:
+  playlist name, source, then date and time so that two downloads never share a folder.
+- **`TrackCollection.name` is empty when the source gives no name** (a title that could not be read, typed tracks,
+  several pasted lines). Never fill it with a link or an identifier: it would end up in a folder name. Show
+  `TrackCollection.display_name` to the user instead; it falls back on the link, then on `Typed tracks`.
+- The downloader creates the folder right before each sockseek run and deletes it again when it is empty
+  afterwards, so a cancelled download, or one where everything was already downloaded, leaves nothing behind.
+  `check_ready()` only checks the download folder itself, which is what tells an unplugged USB key apart.
+- Tracks skipped as already downloaded stay in the folder of the batch that fetched them; the history is shared
+  by every batch on purpose.
+- `Settings.name_format` still names the files inside the folder; the folder is not part of it.
 
 ### Relaxed search
 
@@ -215,7 +236,8 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
 
 - **sockseek is always run with `--no-config`** and every option passed explicitly from the settings. A global
   `%APPDATA%\sockseek\sockseek.conf` exists on the author's machine and must not influence runs.
-- **Flat output** comes from `--name-format`: with it, sockseek does not create a per-playlist subfolder.
+- **Flat output** comes from `--name-format`: with it, sockseek does not create a subfolder of its own inside the
+  folder of the batch.
 - **The sockseek index is the download history.** One shared `--index-path` is used for every run; sockseek keeps
   the rows of other inputs and skips rows already downloaded even when the file has since been moved. State codes
   seen in the `state` column: `1` downloaded, `2` failed, `3` skipped as already downloaded.
@@ -230,8 +252,8 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
   (downloaded, then failed, then unfinished); `read_index()` applies the same rule when reading. A row skipped by
   a later run may keep state `1`, so "already downloaded" is decided from a snapshot taken before sockseek starts
   (`previously_downloaded`).
-- **Staging leftovers**: sockseek downloads into `<output folder>/.sockseek-staging`; partial files stay there
-  after failed transfers or a kill, so that folder is deleted after every run.
+- **Staging leftovers**: sockseek downloads into `<folder of the batch>/.sockseek-staging`; partial files stay
+  there after failed transfers or a kill, so that folder is deleted after every run.
 - **PIA (`piactl`)**: `get connectionstate` says `Connected` a few seconds before traffic is really routed, and
   `get pubip` is the *real* address even while connected (`vpnip` is the VPN one, `Unknown` for ~8 s). So
   `VpnGuard` confirms with an outside lookup (`ADDRESS_LOOKUP_URLS`) that the visible address differs from `pubip`
@@ -267,14 +289,16 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
 
 ## State of the project
 
-First released as 0.2.0, left in a finished state on 2026-10-07. What is known to work and what is not:
+First released as 0.2.0; 0.3.0 added one folder per download. Left in a finished state on 2026-10-07. What is
+known to work and what is not:
 
-- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (177
+- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (192
   tests, none skipped, including the offline runs of the real sockseek and the hidden-window tests), the build, and
   the smoke test showing that the packaged application starts and that the sockseek and ffmpeg packed inside answer.
 - **Checked by hand on Windows**: the setup program installs, starts and uninstalls; a whole download driven through
   the real window against sockseek's mock mode (exact search, relaxed search, M4A conversion, password masked in
-  the log).
+  the log), and three downloads in a row landing in their own folders (a text file, typed tracks, and one with
+  nothing new that leaves no folder).
 - **Never checked**: what the window looks like on a Mac (fonts, the `clam` theme, dialogs), the first-launch steps
   on macOS described in `README.md`, and `piactl` at `/usr/local/bin/piactl`. The relaxed search has only run
   against the mock mode, never the real Soulseek network. The `manual` VPN mode has only run with simulated

@@ -88,6 +88,17 @@ def make_settings(tmp_path: Path, vpn_mode: str) -> Settings:
     )
 
 
+def batch_directory(tmp_path: Path, name: str = "list - 2026-10-07 21-45-03") -> Path:
+    """
+    Tell where a batch of a test is saved, inside the download folder of :func:`make_settings`.
+
+    :param tmp_path: Temporary folder of the test
+    :param name: Name of the folder of the batch
+    :returns: The folder of the batch
+    """
+    return tmp_path / "output" / name
+
+
 def test_download_without_vpn_asks_first_and_names_the_visible_address(tmp_path, recording_downloader):
     """
     Without a VPN, the user is warned that their address will be visible, and a no means nothing is downloaded.
@@ -107,13 +118,25 @@ def test_download_without_vpn_asks_first_and_names_the_visible_address(tmp_path,
 
     settings = make_settings(tmp_path, VPN_MODE_NONE)
     with pytest.raises(DownloadCancelled):
-        run_download(settings, [TRACK], "list", lambda message, level: notifications.append((message, level)), refuse)
+        run_download(
+            settings,
+            [TRACK],
+            "list",
+            batch_directory(tmp_path),
+            lambda message, level: notifications.append((message, level)),
+            refuse,
+        )
     assert recording_downloader.runs == []
     assert "No VPN is used" in questions[0]
     assert "your real IP address (203.0.113.10 (Paris, FR, Home Internet Provider))" in questions[0]
 
     report = run_download(
-        settings, [TRACK], "list", lambda message, level: notifications.append((message, level)), lambda question: True
+        settings,
+        [TRACK],
+        "list",
+        batch_directory(tmp_path),
+        lambda message, level: notifications.append((message, level)),
+        lambda question: True,
     )
     assert report.downloaded == [TRACK]
     assert recording_downloader.runs == [[TRACK]]
@@ -129,13 +152,20 @@ def test_download_behind_own_vpn_shows_the_visible_address_for_approval(tmp_path
     settings = make_settings(tmp_path, VPN_MODE_MANUAL)
     with pytest.raises(DownloadCancelled):
         run_download(
-            settings, [TRACK], "list", lambda message, level: None, lambda question: bool(questions.append(question))
+            settings,
+            [TRACK],
+            "list",
+            batch_directory(tmp_path),
+            lambda message, level: None,
+            lambda question: bool(questions.append(question)),
         )
     assert recording_downloader.runs == []
     assert "203.0.113.10 (Paris, FR, Home Internet Provider)" in questions[0]
     assert "answer No" in questions[0]
 
-    report = run_download(settings, [TRACK], "list", lambda message, level: None, lambda question: True)
+    report = run_download(
+        settings, [TRACK], "list", batch_directory(tmp_path), lambda message, level: None, lambda question: True
+    )
     assert report.downloaded == [TRACK] and not report.stopped_early
 
 
@@ -151,6 +181,7 @@ def test_download_behind_own_vpn_refuses_to_start_when_the_address_is_unknown(
             make_settings(tmp_path, VPN_MODE_MANUAL),
             [TRACK],
             "list",
+            batch_directory(tmp_path),
             lambda message, level: None,
             lambda question: pytest.fail("nothing must be asked"),
         )
@@ -190,6 +221,7 @@ def test_download_behind_own_vpn_stops_when_the_visible_address_changes(tmp_path
         make_settings(tmp_path, VPN_MODE_MANUAL),
         [TRACK],
         "list",
+        batch_directory(tmp_path),
         lambda message, level: notifications.append((message, level)),
         lambda question: True,
     )
@@ -203,7 +235,8 @@ def test_download_behind_own_vpn_stops_when_the_visible_address_changes(tmp_path
 @pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file() or FFMPEG is None, reason="needs sockseek and ffmpeg")
 def test_run_download_reports_progress_and_converts_other_formats(tmp_path, monkeypatch):
     """
-    A file found in another format is followed live, saved, converted to MP3 and reported under its new name.
+    A file found in another format is followed live, saved in the folder of the batch, converted to MP3 and
+    reported under its new name.
     """
     monkeypatch.setattr(workflow, "lookup_visible_location", lambda: HOME_LOCATION)
     shared_files = tmp_path / "shared"
@@ -238,6 +271,7 @@ def test_run_download_reports_progress_and_converts_other_formats(tmp_path, monk
         settings,
         [found, missing],
         "offline run",
+        batch_directory(tmp_path),
         notify=lambda message, level: notifications.append((message, level)),
         confirm=lambda question: True,
         on_output_line=handle_output_line,
@@ -247,7 +281,9 @@ def test_run_download_reports_progress_and_converts_other_formats(tmp_path, monk
     assert report.failed == [missing]
     assert [entry.status for entry in tracker.snapshot()] == [STATUS_DOWNLOADED, STATUS_FAILED]
     assert Path(report.saved_files[found]).name == "Test Artist - Test Tone.mp3"
-    assert sorted(path.name for path in settings.output_directory.glob("*.*")) == ["Test Artist - Test Tone.mp3"]
+    assert Path(report.saved_files[found]).parent == batch_directory(tmp_path)
+    assert [path.name for path in batch_directory(tmp_path).iterdir()] == ["Test Artist - Test Tone.mp3"]
+    assert list(settings.output_directory.iterdir()) == [batch_directory(tmp_path)]
     assert any("SongJob" in line for line in log_lines)
     assert notifications[0][1] == LEVEL_WARNING and "VPN: none" in notifications[0][0]
     assert any("Converted Test Artist - Test Tone.flac" in message for message, _ in notifications)
@@ -257,7 +293,8 @@ def test_run_download_reports_progress_and_converts_other_formats(tmp_path, monk
 def test_run_download_finds_tracks_under_simpler_spellings(tmp_path, monkeypatch):
     """
     A track whose file is named without accents or article is found by a later, simpler search, reported as a
-    relaxed match to check, and skipped by the next run. Without the setting it stays not found.
+    relaxed match to check, and skipped by the next run. Without the setting it stays not found. Each run saves
+    into the folder of its own batch, and a run that saves nothing leaves no folder.
     """
     monkeypatch.setattr(workflow, "lookup_visible_location", lambda: HOME_LOCATION)
     shared_files = tmp_path / "shared"
@@ -283,12 +320,14 @@ def test_run_download_finds_tracks_under_simpler_spellings(tmp_path, monkeypatch
         notifications.append((message, level))
 
     strict_settings = dataclasses.replace(settings, relaxed_search=False, index_path=tmp_path / "strict" / "index.csv")
-    strict_report = run_download(strict_settings, tracks, "strict", notify, lambda question: True)
+    strict_batch, relaxed_batch, later_batch = (
+        batch_directory(tmp_path, name) for name in ("first", "second", "third")
+    )
+    strict_report = run_download(strict_settings, tracks, "strict", strict_batch, notify, lambda question: True)
     assert strict_report.downloaded == [TRACK]
     assert strict_report.failed == [accented, missing]
     assert strict_report.relaxed_matches == {}
-    for saved_file in settings.output_directory.iterdir():
-        saved_file.unlink()
+    assert [path.name for path in strict_batch.iterdir()] == ["Darude - Feel the Beat.mp3"]
 
     tracker = ProgressTracker(tracks)
     followed_queries: list[list[str]] = []
@@ -307,6 +346,7 @@ def test_run_download_finds_tracks_under_simpler_spellings(tmp_path, monkeypatch
         settings,
         tracks,
         "relaxed",
+        relaxed_batch,
         notify,
         lambda question: True,
         on_output_line=tracker.handle_line,
@@ -317,6 +357,8 @@ def test_run_download_finds_tracks_under_simpler_spellings(tmp_path, monkeypatch
     assert followed_queries == [["Skone - L'arret sur image"], ["Skone - arret sur image"]]
     assert report.relaxed_matches[accented].query == "Skone - arret sur image"
     assert Path(report.saved_files[accented]).is_file()
+    assert sorted(relaxed_batch.iterdir()) == sorted(Path(report.saved_files[track]) for track in (TRACK, accented))
+    assert [path.name for path in strict_batch.iterdir()] == ["Darude - Feel the Beat.mp3"]
     progress = {entry.track: entry for entry in tracker.snapshot()}
     assert progress[accented].status == STATUS_DOWNLOADED
     assert progress[accented].relaxed_query == "Skone - arret sur image"
@@ -328,9 +370,11 @@ def test_run_download_finds_tracks_under_simpler_spellings(tmp_path, monkeypatch
     assert 'Found by searching "Skone - arret sur image": Sköne - L\'arrêt sur image  ->  ' in found_message
     assert "Check that it is the right track." in found_message
 
-    second_report = run_download(settings, tracks, "relaxed", notify, lambda question: True)
+    second_report = run_download(settings, tracks, "relaxed", later_batch, notify, lambda question: True)
     assert second_report.already_downloaded == [TRACK, accented]
     assert second_report.downloaded == []
+    assert not later_batch.exists()
+    assert sorted(settings.output_directory.iterdir()) == [strict_batch, relaxed_batch]
 
 
 def test_no_further_search_once_the_download_was_stopped(tmp_path, recording_downloader, monkeypatch):
@@ -371,6 +415,11 @@ def test_no_further_search_once_the_download_was_stopped(tmp_path, recording_dow
     monkeypatch.setattr(workflow, "SockseekDownloader", StoppedDownloader)
     accented = Track(artists=("Sköne",), title="L'arrêt sur image")
     report = run_download(
-        make_settings(tmp_path, VPN_MODE_NONE), [accented], "list", lambda message, level: None, lambda question: True
+        make_settings(tmp_path, VPN_MODE_NONE),
+        [accented],
+        "list",
+        batch_directory(tmp_path),
+        lambda message, level: None,
+        lambda question: True,
     )
     assert report.failed == [accented] and report.stopped_early

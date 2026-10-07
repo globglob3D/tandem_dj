@@ -6,6 +6,7 @@ import dataclasses
 import json
 import logging
 import queue
+import re
 import threading
 import tkinter
 
@@ -78,9 +79,10 @@ def test_read_tracks_are_listed_as_sent_to_sockseek(window):
     )
 
 
-def test_live_progress_and_final_report_reach_the_table(window):
+def test_live_progress_and_final_report_reach_the_table(window, tmp_path):
     """
-    A running transfer shows its bar, size, speed and time left; the report then shows the saved file.
+    A running transfer shows its bar, size, speed and time left; the report then shows the saved file and the
+    folder of the download.
     """
     collection = TrackCollection(name="Son 2 Teuf", origin="spotify", tracks=[SKONE, DARUDE])
     window._show_tracks(collection, [SKONE, DARUDE], duplicate_count=0, already_downloaded=[])
@@ -113,13 +115,48 @@ def test_live_progress_and_final_report_reach_the_table(window):
     report = DownloadReport(
         downloaded=[DARUDE], not_attempted=[SKONE], saved_files={DARUDE: "D:/new_downloads/Darude - Feel The Beat.mp3"}
     )
-    window._show_report(report)
+    window._show_report(report, tmp_path)
     assert cells(window, 1)["detail"] == "saved as Darude - Feel The Beat.mp3"
     assert cells(window, 0)["status"] == "Not finished"
     assert "1 downloaded" in window.summary_label.cget("text")
+    window._refresh()
+    assert f"The files of this download are in {tmp_path}" in window.log_box.get("1.0", "end")
 
 
-def test_track_found_under_a_simpler_spelling_is_flagged_for_a_check(window):
+def test_download_is_given_a_new_folder_named_after_the_playlist(window, monkeypatch, tmp_path):
+    """
+    Every download gets a folder of its own inside the download folder, named after the playlist, the website and
+    the time, and the log says which. When nothing was saved, the log says that no folder was created.
+    """
+    batch_directories = []
+
+    def record(settings, tracks, name, batch_directory, **callbacks) -> DownloadReport:
+        """
+        Record the folder of the batch instead of downloading.
+
+        :param settings: Unused
+        :param tracks: Unused
+        :param name: Unused
+        :param batch_directory: Folder the batch would be saved in
+        :param callbacks: Unused
+        :returns: A report without any track
+        """
+        batch_directories.append(batch_directory)
+        return DownloadReport()
+
+    monkeypatch.setattr(main_window, "run_download", record)
+    window.collection = TrackCollection(name="Son 2 Teuf", origin="spotify", tracks=[DARUDE])
+    window.requested_tracks = [DARUDE]
+    window._download(window.settings)
+    window._refresh()
+    assert batch_directories[0].parent == window.settings.output_directory
+    assert re.fullmatch(r"Son 2 Teuf - spotify - \d{4}-\d\d-\d\d \d\d-\d\d-\d\d", batch_directories[0].name)
+    log_text = window.log_box.get("1.0", "end")
+    assert f"This download is saved in a folder of its own: {batch_directories[0]}" in log_text
+    assert "Nothing new was saved, so no folder was created for this download." in log_text
+
+
+def test_track_found_under_a_simpler_spelling_is_flagged_for_a_check(window, tmp_path):
     """
     A relaxed match stands out in the table and names the search that found it.
     """
@@ -131,7 +168,7 @@ def test_track_found_under_a_simpler_spelling_is_flagged_for_a_check(window):
         saved_files={DARUDE: "D:/music/Darude - Feel The Beat.mp3", SKONE: "D:/music/skone_afterlife.mp3"},
         relaxed_matches={SKONE: SearchVariant("Skone", "Afterlife", "without accents")},
     )
-    window._show_report(report)
+    window._show_report(report, tmp_path)
     assert cells(window, 0)["status"] == "Downloaded - check"
     assert (
         cells(window, 0)["detail"] == 'saved as skone_afterlife.mp3, found by searching "Skone - Afterlife": check it'
