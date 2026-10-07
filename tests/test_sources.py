@@ -5,13 +5,14 @@ Nothing here touches the network: website responses are represented by small sam
 """
 
 import pytest
+import yt_dlp
 
 from tandem_dj.models import Track, TrackCollection
-from tandem_dj.sources import SourceError, read_track_lines, read_tracks
+from tandem_dj.sources import SourceError, read_track_lines, read_tracks, youtube
 from tandem_dj.sources.soundcloud import SoundCloudSource, _track_from_description
 from tandem_dj.sources.spotify import SpotifySource, _track_from_playlist_item, _tracks_from_embed_list
 from tandem_dj.sources.text import parse_track_line
-from tandem_dj.sources.youtube import YouTubeSource, _track_from_entry
+from tandem_dj.sources.youtube import ONLY_VIDEO_WARNING, YouTubeSource, _track_from_entry, playlist_link
 
 
 @pytest.mark.parametrize(
@@ -183,6 +184,113 @@ def test_youtube_unavailable_video_is_skipped():
     Deleted and private videos yield no track.
     """
     assert _track_from_entry({"title": "[Deleted video]"}) is None
+
+
+@pytest.mark.parametrize(
+    ("reference", "expected_link"),
+    [
+        (
+            "https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PL0123456789abcdefghij",
+            "https://www.youtube.com/playlist?list=PL0123456789abcdefghij",
+        ),
+        (
+            "https://www.youtube.com/watch?v=bbbbbbbbbbb&list=PL0123456789abcdefghij&index=2",
+            "https://www.youtube.com/playlist?list=PL0123456789abcdefghij",
+        ),
+        (
+            "youtu.be/aaaaaaaaaaa?list=PL0123456789abcdefghij",
+            "https://www.youtube.com/playlist?list=PL0123456789abcdefghij",
+        ),
+        (
+            "https://music.youtube.com/watch?v=aaaaaaaaaaa&list=OLAK5uy_0123456789",
+            "https://music.youtube.com/playlist?list=OLAK5uy_0123456789",
+        ),
+        ("https://www.youtube.com/playlist?list=PL0123456789abcdefghij", None),
+        ("https://www.youtube.com/watch?v=aaaaaaaaaaa", None),
+        ("https://www.youtube.com/watch?v=aaaaaaaaaaa&list=RDaaaaaaaaaaa&start_radio=1", None),
+    ],
+)
+def test_youtube_video_link_naming_a_playlist_leads_to_the_page_of_that_playlist(reference, expected_link):
+    """
+    The link of a video opened from a playlist is turned into the link of the playlist itself, whatever video it
+    shows. A mix, which only exists next to its first video, and links without a playlist are left as they are.
+    """
+    assert playlist_link(reference) == expected_link
+
+
+def test_youtube_video_link_naming_a_playlist_reads_the_whole_playlist(monkeypatch):
+    """
+    Pasting the link of one video of a playlist reads every video of the playlist, by asking YouTube for the page
+    of the playlist instead of the page of the video.
+    """
+    asked: list[str] = []
+
+    def list_videos(reference: str) -> dict:
+        """
+        Answer like yt-dlp for the page of a playlist of two videos.
+
+        :param reference: Link asked for
+        :returns: Description of the playlist
+        """
+        asked.append(reference)
+        return {
+            "_type": "playlist",
+            "title": "Warehouse  Classics",
+            "webpage_url": reference,
+            "entries": iter(
+                [
+                    {"title": "Daniel Avery - Naive Response", "channel": "Some Uploader", "duration": 414},
+                    {"title": "Darude - Feel the Beat (Official Video)", "channel": "Some Uploader", "duration": 259},
+                ]
+            ),
+        }
+
+    monkeypatch.setattr(youtube, "_list_videos", list_videos)
+    collection = YouTubeSource().read("https://www.youtube.com/watch?v=bbbbbbbbbbb&list=PL0123456789abcdefghij&index=2")
+    assert asked == ["https://www.youtube.com/playlist?list=PL0123456789abcdefghij"]
+    assert (collection.name, collection.url) == ("Warehouse Classics", asked[0])
+    assert [track.display_name for track in collection.tracks] == [
+        "Daniel Avery - Naive Response",
+        "Darude - Feel the Beat",
+    ]
+    assert collection.warnings == []
+
+
+def test_youtube_playlist_that_cannot_be_read_gives_the_video_and_a_warning(monkeypatch):
+    """
+    When YouTube refuses the playlist a video link names, the video alone is read and the user is told that the
+    rest of the playlist is missing.
+    """
+    asked: list[str] = []
+
+    def list_videos(reference: str) -> dict:
+        """
+        Answer like yt-dlp when the playlist is private: an error for its page, the video for the video link.
+
+        :param reference: Link asked for
+        :returns: Description of the video
+        :raises yt_dlp.utils.DownloadError: For the page of the playlist
+        """
+        asked.append(reference)
+        if "/playlist?" in reference:
+            raise yt_dlp.utils.DownloadError("The playlist does not exist.")
+        return {
+            "title": "Darude - Feel the Beat",
+            "channel": "Some Uploader",
+            "duration": 259,
+            "webpage_url": reference,
+        }
+
+    monkeypatch.setattr(youtube, "_list_videos", list_videos)
+    video_link = "https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PL0123456789abcdefghij"
+    collection = YouTubeSource().read(video_link)
+    assert asked == ["https://www.youtube.com/playlist?list=PL0123456789abcdefghij", video_link]
+    assert [track.display_name for track in collection.tracks] == ["Darude - Feel the Beat"]
+    assert collection.warnings == [ONLY_VIDEO_WARNING]
+
+    asked.clear()
+    assert YouTubeSource().read("https://www.youtube.com/watch?v=aaaaaaaaaaa").warnings == []
+    assert asked == ["https://www.youtube.com/watch?v=aaaaaaaaaaa"]
 
 
 def test_soundcloud_description_uses_publisher_artist():

@@ -347,6 +347,13 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
 - **SoundCloud** describes only the first few tracks of a set in full; the others are fetched by id in batches of 50.
 - **YouTube** flat listings carry only title, channel and duration, so artists are parsed from titles. Channels
   ending in ` - Topic` are auto-generated and name the artist reliably.
+- **A YouTube video link that names a playlist** (`watch?v=<video>&list=<playlist>`) is read through the page of
+  the playlist (`playlist_link()` builds `playlist?list=<playlist>`). Asked for the video link, yt-dlp reads the
+  page of the video and takes the playlist from its side panel; when YouTube serves that page without the panel,
+  yt-dlp only warns ("Unable to recognize playlist. Downloading just video") and returns one video, which the
+  user saw as "only the first track is read". Mixes (`list=RD...`) only exist next to a video, so their link is
+  left as it is. When a link names a playlist and one video comes back, the collection carries
+  `ONLY_VIDEO_WARNING`. yt-dlp warnings and errors are written to the log file (`yt-dlp: ...`).
 - The Soulseek password appears on the sockseek command line; use `SockseekDownloader.describe_command()` when a
   command has to be displayed or logged.
 
