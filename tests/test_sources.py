@@ -17,7 +17,7 @@ from tandem_dj.sources.youtube import YouTubeSource, _track_from_entry
 @pytest.mark.parametrize(
     ("reference", "expected_source"),
     [
-        ("https://open.spotify.com/playlist/5Q8ljADP201Tj4r2VMrJ7t?si=053badf86ff646e1", SpotifySource),
+        ("https://open.spotify.com/playlist/0123456789abcdefghijkl?si=0123456789abcdef", SpotifySource),
         ("https://open.spotify.com/intl-fr/track/6p6ujYQxSrF70DCIVF4U6q", SpotifySource),
         ("spotify:album:1ibY9xHMd0OSPz4pR1NeaQ", SpotifySource),
         ("https://www.youtube.com/playlist?list=PLMC9KNkIncKtPzgY-5rmhvj7fax8fdxoj", YouTubeSource),
@@ -90,7 +90,7 @@ def test_collection_without_a_name_is_shown_by_its_link():
     """
     A playlist whose title could not be read is called by its link in front of the user, and by its title otherwise.
     """
-    link = "https://open.spotify.com/playlist/5Q8ljADP201Tj4r2VMrJ7t"
+    link = "https://open.spotify.com/playlist/0123456789abcdefghijkl"
     assert TrackCollection(name="", origin="spotify", url=link).display_name == link
     assert TrackCollection(name="Son 2 Teuf", origin="spotify", url=link).display_name == "Son 2 Teuf"
 

@@ -135,7 +135,7 @@ def test_search_download_and_success():
             title="Naive Response",
             lifecycleState="Terminal",
             terminalOutcome="Succeeded",
-            downloadPath="D:\\new_downloads\\Daniel Avery - Naive Response.mp3",
+            downloadPath="D:\\music\\Daniel Avery - Naive Response.mp3",
             size=10_000_000,
             bitRate=320,
             extension="mp3",

@@ -113,7 +113,7 @@ def test_live_progress_and_final_report_reach_the_table(window, tmp_path):
     assert "0 / 2 done" in window.summary_label.cget("text")
 
     report = DownloadReport(
-        downloaded=[DARUDE], not_attempted=[SKONE], saved_files={DARUDE: "D:/new_downloads/Darude - Feel The Beat.mp3"}
+        downloaded=[DARUDE], not_attempted=[SKONE], saved_files={DARUDE: "D:/music/Darude - Feel The Beat.mp3"}
     )
     window._show_report(report, tmp_path)
     assert cells(window, 1)["detail"] == "saved as Darude - Feel The Beat.mp3"
