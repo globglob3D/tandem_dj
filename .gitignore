@@ -3,6 +3,9 @@ vendor/sockseek/sockseek
 vendor/sockseek/sockseek.exe
 vendor/sockseek/sockseek.conf
 
+# Version read from the git tag when the project is installed
+src/tandem_dj/_version.py
+
 # Build output of scripts/build.py
 dist/
 build/

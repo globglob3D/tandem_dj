@@ -1,6 +1,6 @@
 [project]
 name = "tandem-dj"
-version = "0.2.0"
+dynamic = ["version"]
 description = "A window for managing DJ music: read playlists and batch-download their tracks from Soulseek"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,8 +21,21 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+# The version is the latest git tag (v0.2.0 gives 0.2.0); commits after a tag get a development version such as
+# 0.2.1.dev3+g1a2b3c4. It is written to src/tandem_dj/_version.py whenever the project is installed.
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.0.0"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/tandem_dj/_version.py"
+
+# Makes uv install the project again, and so refresh the version, when the commit or the tags change.
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true } }]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tandem_dj"]

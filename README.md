@@ -209,11 +209,20 @@ uv run python scripts/smoke_test.py   # starts the result and checks that it fin
 
 ## Releasing a new version
 
-1. Set the new version in `src/tandem_dj/__init__.py` (`__version__`) and in `pyproject.toml` (`version`), run
-   `uv lock`, and commit.
-2. Tag the commit and push the tag: `git tag v0.3.0; git push origin v0.3.0`.
-3. GitHub builds the three downloads and attaches them to a release named after the tag. Send those files to
-   whoever uses Tandem DJ; installing over the old version keeps settings and history.
+The version is never written in the code: it is the git tag. Creating the tag is the whole release.
+
+1. On GitHub, open **Releases**, then **Draft a new release**. Under **Choose a tag**, type the new version with a
+   `v` in front, such as `v0.3.0`, and pick **Create new tag on publish**, with `main` as the target.
+2. Give it a title and a few lines of notes (which file to download, what changed), then **Publish release**.
+3. GitHub builds the three downloads, named after the version, and attaches them to the release about ten minutes
+   later. Send those files to whoever uses Tandem DJ; installing over the old version keeps settings and history.
+
+The same from a terminal: `git tag v0.3.0; git push origin v0.3.0`.
+
+Builds made between two releases carry a development version such as `0.3.1.dev4+g1a2b3c4`: the next version,
+the number of commits since the last tag, and the commit. The first line of every log file gives the version,
+so a log always says which build it came from. Version numbers follow `major.minor.patch`; anything below `1.0.0`
+is a beta.
 
 To ship a newer sockseek, change `SOCKSEEK_VERSION` in `scripts/build.py`, delete the program in `vendor/sockseek/`
 and run the tests.

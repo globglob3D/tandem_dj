@@ -40,7 +40,10 @@ jobs:
             artifact: macos-x64
             files: dist/*.dmg
     steps:
+      # The whole history and the tags are needed to work out the version from the latest tag.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@v6
 

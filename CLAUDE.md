@@ -173,8 +173,13 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 - `paths.is_packaged()` and `paths.resource_directory()` are the only places that know about PyInstaller.
 - The sockseek version to ship is `SOCKSEEK_VERSION` in `scripts/build.py`; the build downloads it when
   `vendor/sockseek` does not hold the program of the current system.
-- The version of the application is `__version__` in `src/tandem_dj/__init__.py` and `version` in `pyproject.toml`.
-  Releasing is: bump both, `uv lock`, commit, push a `v<version>` tag; the workflow publishes the three downloads.
+- **The version is the git tag**, never a number in the code. `hatch-vcs` reads the latest `v*` tag when the
+  project is installed and writes `src/tandem_dj/_version.py` (untracked), which `tandem_dj.__version__` imports
+  and PyInstaller packs. Commits after a tag give a development version such as `0.2.1.dev3+g1a2b3c4`.
+  `[tool.uv] cache-keys` makes `uv sync` and `uv run` install the project again when the commit or the tags
+  change, so the version does not go stale; the workflow checks out the whole history (`fetch-depth: 0`) for the
+  same reason. Releasing is creating a `v<version>` tag on `main` (from the GitHub release page or with
+  `git tag`); the workflow publishes the three downloads.
 
 ## Standing requirements from the user
 
@@ -260,7 +265,7 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
 
 ## State of the project
 
-Version 0.2.0, left in a finished state on 2026-10-07. What is known to work and what is not:
+First released as 0.2.0, left in a finished state on 2026-10-07. What is known to work and what is not:
 
 - **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (177
   tests, none skipped, including the offline runs of the real sockseek and the hidden-window tests), the build, and
