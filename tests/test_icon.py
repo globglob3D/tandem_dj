@@ -86,4 +86,20 @@ def test_icon_keeps_square_pixels_and_transparent_corners(make_icon):
         assert pixels[0][0] == make_icon.TRANSPARENT
         assert pixels[size // 2][0] == make_icon.BORDER
     colors = {pixel for row in make_icon.render(32) for pixel in row}
-    assert {make_icon.GREEN, make_icon.BEIGE, make_icon.BACKGROUND} <= colors
+    assert {make_icon.GREEN, make_icon.BEIGE, make_icon.AMBER, make_icon.BACKGROUND} <= colors
+
+
+def test_the_two_birds_of_the_icon_face_each_other(make_icon):
+    """
+    The right half of every drawing mirrors the left half: same shapes, the second bird in its own colours.
+    """
+    recolored = {
+        make_icon.GREEN: make_icon.BEIGE,
+        make_icon.GREEN_SHADE: make_icon.BEIGE_SHADE,
+    }
+    for drawing in (make_icon.DETAILED_DRAWING, make_icon.SMALL_DRAWING):
+        cells = make_icon.draw_cells(drawing)
+        assert any(make_icon.GREEN in row for row in cells)
+        for row in cells:
+            left_half = [recolored.get(cell, cell) for cell in row[: drawing.grid // 2]]
+            assert left_half == row[: drawing.grid // 2 - 1 : -1]

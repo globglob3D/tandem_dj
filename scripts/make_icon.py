@@ -1,9 +1,10 @@
 """
-Draw the icon of the application: two meshing cogwheels in pixel art, in the colours of the window.
+Draw the icon of the application: two birds facing each other in pixel art, in the colours of the window.
 
-The wheels are drawn by hand as small pixel maps, placed on a grid and enlarged without smoothing, which keeps the
-pixels square at every size. A coarser drawing serves the sizes the detailed one does not divide. Running this
-script rewrites ``icon.png``, ``icon.ico`` (Windows) and ``icon.icns`` (macOS) in the assets folder of the package::
+The bird is drawn by hand as a small pixel map, placed twice on a grid (once flipped) and enlarged without smoothing,
+which keeps the pixels square at every size. A coarser drawing serves the sizes the detailed one does not divide.
+Running this script rewrites ``icon.png``, ``icon.ico`` (Windows) and ``icon.icns`` (macOS) in the assets folder of
+the package::
 
     uv run python scripts/make_icon.py
 """
@@ -24,66 +25,44 @@ GREEN: Color = (0x9C, 0xB8, 0x7C, 255)
 GREEN_SHADE: Color = (0x6F, 0x88, 0x59, 255)
 BEIGE: Color = (0xD5, 0xC8, 0xAB, 255)
 BEIGE_SHADE: Color = (0x8D, 0x84, 0x70, 255)
+AMBER: Color = (0xD9, 0xA5, 0x4C, 255)
 
 PNG_SIZE = 256
 ICO_SIZES = (16, 32, 48, 64, 128, 256)
 ICNS_ENTRIES = (("ic11", 32), ("ic12", 64), ("ic07", 128), ("ic13", 256), ("ic08", 256), ("ic14", 512), ("ic09", 512))
 
-WHEEL_CELL = "#"
-HUB_CELL = "o"
+BODY_CELL = "#"
+WING_CELL = "w"
+EYE_CELL = "o"
+BEAK_CELL = "b"
+LEG_CELL = "l"
 
-LARGE_WHEEL = (
-    "........###........",
-    "........###........",
-    "...##...###...##...",
-    "..###..#####..###..",
-    "..###############..",
-    "....###########....",
-    "....####ooo####....",
-    "...####ooooo####...",
-    "#######oo.oo#######",
-    "#######o...o#######",
-    "#######oo.oo#######",
-    "...####ooooo####...",
-    "....####ooo####....",
-    "....###########....",
-    "..###############..",
-    "..###..#####..###..",
-    "...##...###...##...",
-    "........###........",
-    "........###........",
+LARGE_BIRD = (
+    "......####...",
+    ".....######..",
+    "....####o###.",
+    "....#######bb",
+    "....#######b.",
+    "...#########.",
+    "..##########.",
+    "..#www######.",
+    ".##wwww#####.",
+    ".#wwwww#####.",
+    "##wwwww####..",
+    "#wwwww#####..",
+    "#wwww#####...",
+    "...######....",
+    ".....l.l.....",
+    ".....l.l.....",
 )
-MEDIUM_WHEEL = (
-    "....###....",
-    ".##.###.##.",
-    ".#########.",
-    "..#######..",
-    "#####.#####",
-    "####...####",
-    "#####.#####",
-    "..#######..",
-    ".#########.",
-    ".##.###.##.",
-    "....###....",
-)
-SMALL_WHEEL = (
-    "....##....",
-    ".##.##.##.",
-    ".########.",
-    "..######..",
-    "####..####",
-    "####..####",
-    "..######..",
-    ".########.",
-    ".##.##.##.",
-    "....##....",
-)
-TINY_WHEEL = (
-    "#.#.#",
+SMALL_BIRD = (
     ".###.",
-    "##.##",
-    ".###.",
-    "#.#.#",
+    ".#o#b",
+    "####.",
+    "#ww#.",
+    "#w##.",
+    ".##..",
+    ".l...",
 )
 
 
@@ -101,37 +80,47 @@ def main() -> None:
 
 
 @dataclass(frozen=True)
-class Wheel:
+class Bird:
     """
-    One cogwheel placed on the drawing grid.
+    One bird placed on the drawing grid.
 
-    :param cells: Pixel map of the wheel, one text per row: ``#`` for the wheel, ``o`` for its hub, anything else
-        for nothing
+    :param cells: Pixel map of the bird looking to the right, one text per row: ``#`` for the body, ``w`` for the
+        wing, ``o`` for the eye, ``b`` for the beak, ``l`` for the legs, anything else for nothing
     :param left: Column of the grid receiving the first column of the pixel map
     :param top: Row of the grid receiving the first row of the pixel map
-    :param color: Colour of the wheel
-    :param hub_color: Colour of its hub
+    :param color: Colour of the body
+    :param wing_color: Colour of the wing
+    :param looks_left: Whether the pixel map is flipped, so that the bird looks to the left
     """
 
     cells: tuple[str, ...]
     left: int
     top: int
     color: Color
-    hub_color: Color
+    wing_color: Color
+    looks_left: bool = False
 
     def color_at(self, column: int, row: int) -> Color | None:
         """
-        Tell what the wheel paints in a cell of the grid.
+        Tell what the bird paints in a cell of the grid.
 
         :param column: Column of the cell
         :param row: Row of the cell
-        :returns: The colour of the wheel or of its hub, ``None`` where the wheel paints nothing
+        :returns: The colour of the part of the bird in that cell, ``None`` where the bird paints nothing
         """
-        wheel_column, wheel_row = column - self.left, row - self.top
-        if not (0 <= wheel_row < len(self.cells) and 0 <= wheel_column < len(self.cells[wheel_row])):
+        bird_column, bird_row = column - self.left, row - self.top
+        if not (0 <= bird_row < len(self.cells) and 0 <= bird_column < len(self.cells[bird_row])):
             return None
-        cell = self.cells[wheel_row][wheel_column]
-        return self.color if cell == WHEEL_CELL else self.hub_color if cell == HUB_CELL else None
+        if self.looks_left:
+            bird_column = len(self.cells[bird_row]) - 1 - bird_column
+        colors = {
+            BODY_CELL: self.color,
+            WING_CELL: self.wing_color,
+            EYE_CELL: BACKGROUND,
+            BEAK_CELL: AMBER,
+            LEG_CELL: AMBER,
+        }
+        return colors.get(self.cells[bird_row][bird_column])
 
 
 @dataclass(frozen=True)
@@ -141,28 +130,28 @@ class Drawing:
 
     :param grid: Number of cells per side
     :param corner_radius: Radius of the rounded corners of the background, in cells
-    :param wheels: The wheels, the first one drawn on top
+    :param birds: The birds, the first one drawn on top
     """
 
     grid: int
     corner_radius: float
-    wheels: tuple[Wheel, ...]
+    birds: tuple[Bird, ...]
 
 
 DETAILED_DRAWING = Drawing(
     grid=32,
     corner_radius=5.0,
-    wheels=(
-        Wheel(LARGE_WHEEL, 3, 10, GREEN, GREEN_SHADE),
-        Wheel(MEDIUM_WHEEL, 18, 3, BEIGE, BEIGE_SHADE),
+    birds=(
+        Bird(LARGE_BIRD, 2, 8, GREEN, GREEN_SHADE),
+        Bird(LARGE_BIRD, 17, 8, BEIGE, BEIGE_SHADE, looks_left=True),
     ),
 )
 SMALL_DRAWING = Drawing(
     grid=16,
     corner_radius=2.5,
-    wheels=(
-        Wheel(SMALL_WHEEL, 2, 5, GREEN, GREEN_SHADE),
-        Wheel(TINY_WHEEL, 10, 1, BEIGE, BEIGE_SHADE),
+    birds=(
+        Bird(SMALL_BIRD, 2, 4, GREEN, GREEN_SHADE),
+        Bird(SMALL_BIRD, 9, 4, BEIGE, BEIGE_SHADE, looks_left=True),
     ),
 )
 
@@ -256,15 +245,15 @@ def _cell_color(drawing: Drawing, column: int, row: int) -> Color:
     :param drawing: Drawing the cell belongs to
     :param column: Column of the cell
     :param row: Row of the cell
-    :returns: The colour of a wheel, of the border or of the background; transparent outside the rounded square
+    :returns: The colour of a bird, of the border or of the background; transparent outside the rounded square
     """
     edge_distance = _distance_inside_rounded_square(drawing, column + 0.5, row + 0.5)
     if edge_distance < 0:
         return TRANSPARENT
     if edge_distance < 1:
         return BORDER
-    for wheel in drawing.wheels:
-        color = wheel.color_at(column, row)
+    for bird in drawing.birds:
+        color = bird.color_at(column, row)
         if color is not None:
             return color
     return BACKGROUND

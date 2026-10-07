@@ -52,7 +52,7 @@ src/tandem_dj/
     soundcloud.py    api-v2.soundcloud.com with the website's public client_id
     text.py          parse_track_line() for hand-written lines
 scripts/
-  make_icon.py       draws the icon (two cogwheels in pixel art) with the standard library only
+  make_icon.py       draws the icon (two birds in pixel art) with the standard library only
   build.py           PyInstaller build, then the Windows setup program (Inno Setup) or the macOS disk image
   smoke_test.py      starts the built application on temporary settings and checks what its log says
 .github/workflows/
@@ -114,9 +114,11 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 - Looks live in `ui/theme.py` only (ttk `clam` theme recoloured; plain `tkinter.Text` widgets need
   `style_text_box()`). The user wants it dark, retro and easy on the eyes: muted colours from one palette (beige
   text, a soft green accent, amber and red for warnings and errors), no neon and no decorative animations.
-- The icon is pixel art in the palette of the window: wheels are hand-drawn pixel maps in `scripts/make_icon.py`,
-  enlarged without smoothing. A 32-cell drawing serves sizes 32, 64, 128, 256 and 512; a 16-cell drawing serves 16
-  and 48. `tests/test_icon.py` fails when the committed files differ from what the script draws.
+- The icon is pixel art in the palette of the window: two birds facing each other, a green one and a beige one,
+  with amber beaks and legs. One bird is a hand-drawn pixel map in `scripts/make_icon.py`, placed twice (once
+  flipped) and enlarged without smoothing. The user wants it kept that simple: two plain figures, nothing else.
+  A 32-cell drawing serves sizes 32, 64, 128, 256 and 512; a 16-cell drawing serves 16 and 48.
+  `tests/test_icon.py` fails when the committed files differ from what the script draws.
   `theme.set_application_icon()` applies it, and gives the process its own taskbar identity on Windows.
 - To check the window by eye, drive `MainWindow` against a temporary settings file with
   `extra_arguments = ("--mock-files-dir", <folder>, "--mock-files-slow")` and `vpn_mode = "none"`.
