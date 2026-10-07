@@ -31,7 +31,7 @@ CONVERSION_TIMEOUT_SECONDS = 600
 COVER_ART_ARGUMENTS = ("-map", "0:v?", "-codec:v", "copy")
 
 
-def convert_to_mp3(source_path: Path, ffmpeg_executable: str, bitrate_kbps: int) -> Path:
+def convert_to_mp3(source_path: Path, bitrate_kbps: int) -> Path:
     """
     Convert one audio file to a constant bitrate MP3 next to it, then delete the original.
 
@@ -40,14 +40,13 @@ def convert_to_mp3(source_path: Path, ffmpeg_executable: str, bitrate_kbps: int)
     only deleted once the MP3 exists; an existing MP3 of the same name is never overwritten.
 
     :param source_path: Audio file to convert
-    :param ffmpeg_executable: Name or path of the ffmpeg program, empty for the one shipped with the application
     :param bitrate_kbps: Bitrate of the MP3, in kbps
     :returns: Path of the MP3 file
     :raises ConversionError: If ffmpeg is missing, the MP3 already exists, or the conversion fails
     """
-    ffmpeg_path = find_ffmpeg(ffmpeg_executable)
+    ffmpeg_path = find_ffmpeg()
     if ffmpeg_path is None:
-        raise ConversionError(f"ffmpeg was not found ({ffmpeg_executable or 'none is shipped'}); see the settings.")
+        raise ConversionError(f"ffmpeg was not found, so {source_path.name} was left as it is.")
     target_path = source_path.with_suffix(MP3_EXTENSION)
     if target_path.exists():
         raise ConversionError(f"{target_path.name} already exists, so {source_path.name} was left as it is.")

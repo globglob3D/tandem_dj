@@ -267,9 +267,9 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
   keeps the old path (such as `.flac`), which is harmless: skipping does not check files.
 - **Shipped programs**: `paths.bundled_sockseek()` is `vendor/sockseek/sockseek(.exe)` under the shipped files, and
   `paths.find_ffmpeg()` returns the ffmpeg binary of the `imageio-ffmpeg` package (it has no ffprobe; tests read
-  tags from `ffmpeg -i`). The settings file stores an empty string for both, meaning "the shipped one", so a
-  settings file never pins an installation folder. Relative paths in the settings file are relative to the user
-  data folder.
+  tags from `ffmpeg -i`). ffmpeg is not a setting. The settings file stores an empty string for sockseek, meaning
+  "the shipped one", so a settings file never pins an installation folder. Relative paths in the settings file are
+  relative to the user data folder.
 - **Subprocesses must not open console windows**: the application has no console, so every `subprocess` call
   passes `creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)` and `stdin=subprocess.DEVNULL`.
 - **Offline testing**: sockseek's `--mock-files-dir <folder> --mock-files-no-read-tags` replaces the Soulseek

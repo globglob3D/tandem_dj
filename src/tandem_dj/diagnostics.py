@@ -26,7 +26,7 @@ def describe_setup(settings: Settings, config_path: Path | None = None) -> list[
     :returns: One line per fact, ready to be logged
     """
     sockseek_version = program_version(settings.sockseek_executable)
-    ffmpeg_path = find_ffmpeg(settings.ffmpeg_executable)
+    ffmpeg_path = find_ffmpeg()
     vpn_client_state = "found" if settings.piactl_executable.is_file() else MISSING
     return [
         f"Tandem DJ {__version__} ({'installed application' if is_packaged() else 'running from source'})",

@@ -53,7 +53,6 @@ class SettingsDialog(tkinter.Toplevel):
         self.piactl_executable = tkinter.StringVar(self, str(settings.piactl_executable))
         self.convert_to_mp3 = tkinter.BooleanVar(self, settings.convert_to_mp3)
         self.mp3_bitrate = tkinter.StringVar(self, str(settings.mp3_bitrate))
-        self.ffmpeg_executable = tkinter.StringVar(self, settings.ffmpeg_executable)
 
         form = ttk.Frame(self, padding=14)
         form.pack(fill="both", expand=True)
@@ -82,7 +81,6 @@ class SettingsDialog(tkinter.Toplevel):
             form, "Convert downloads in any other format to MP3 and delete the original", self.convert_to_mp3
         )
         self._add_entry(form, "MP3 bitrate (kbps)", self.mp3_bitrate)
-        self._add_entry(form, "ffmpeg program", self.ffmpeg_executable, hint="empty: the one shipped")
 
         buttons = ttk.Frame(self, padding=(14, 0, 14, 14))
         buttons.pack(fill="x")
@@ -219,5 +217,4 @@ class SettingsDialog(tkinter.Toplevel):
             piactl_executable=Path(self.piactl_executable.get().strip()),
             convert_to_mp3=self.convert_to_mp3.get(),
             mp3_bitrate=mp3_bitrate,
-            ffmpeg_executable=self.ffmpeg_executable.get().strip(),
         )

@@ -125,7 +125,7 @@ def convert_downloads(report: DownloadReport, settings: Settings, notify: Notify
     notify(f"Converting {len(other_format_files)} files to MP3 {settings.mp3_bitrate} kbps...", LEVEL_INFORMATION)
     for track, source_path in other_format_files.items():
         try:
-            target_path = convert_to_mp3(source_path, settings.ffmpeg_executable, settings.mp3_bitrate)
+            target_path = convert_to_mp3(source_path, settings.mp3_bitrate)
         except ConversionError as error:
             notify(f"Conversion: {error}", LEVEL_WARNING)
             continue

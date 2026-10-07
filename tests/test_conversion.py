@@ -76,7 +76,7 @@ def test_convert_to_mp3_handles_lossy_formats_and_keeps_their_tags(tmp_path, ext
         + [*encoder_arguments, "-metadata", "title=Test Tone", str(source_path)],
         check=True,
     )
-    target_path = convert_to_mp3(source_path, "", 320)
+    target_path = convert_to_mp3(source_path, 320)
     assert target_path == tmp_path / "Artist - Test Tone.mp3"
     assert not source_path.exists()
     assert "title : Test Tone" in probe(target_path)
@@ -88,7 +88,7 @@ def test_convert_to_mp3_replaces_the_original_and_keeps_tags(tmp_path):
     The MP3 takes the place of the lossless file and carries its tags over.
     """
     source_path = make_flac(tmp_path / "Artist - Test Tone.flac")
-    target_path = convert_to_mp3(source_path, "", 320)
+    target_path = convert_to_mp3(source_path, 320)
     assert target_path == tmp_path / "Artist - Test Tone.mp3"
     assert target_path.stat().st_size > 0
     assert not source_path.exists()
@@ -107,7 +107,7 @@ def test_convert_to_mp3_never_overwrites(tmp_path):
     existing_path = tmp_path / "song.mp3"
     existing_path.write_bytes(b"existing")
     with pytest.raises(ConversionError, match="already exists"):
-        convert_to_mp3(source_path, "", 320)
+        convert_to_mp3(source_path, 320)
     assert existing_path.read_bytes() == b"existing"
     assert source_path.exists()
 
@@ -120,17 +120,18 @@ def test_failed_conversion_keeps_the_original(tmp_path):
     source_path = tmp_path / "broken.flac"
     source_path.write_bytes(b"this is not audio")
     with pytest.raises(ConversionError, match="could not convert"):
-        convert_to_mp3(source_path, "", 320)
+        convert_to_mp3(source_path, 320)
     assert source_path.exists()
     assert not (tmp_path / "broken.mp3").exists()
 
 
-def test_missing_ffmpeg_is_reported(tmp_path):
+def test_missing_ffmpeg_is_reported(tmp_path, monkeypatch):
     """
     Without ffmpeg, the file is left untouched.
     """
     source_path = tmp_path / "song.flac"
     source_path.write_bytes(b"data")
+    monkeypatch.setattr("tandem_dj.conversion.find_ffmpeg", lambda: None)
     with pytest.raises(ConversionError, match="ffmpeg was not found"):
-        convert_to_mp3(source_path, "no-such-ffmpeg-program", 320)
+        convert_to_mp3(source_path, 320)
     assert source_path.exists()

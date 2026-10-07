@@ -166,8 +166,8 @@ Settings worth knowing, all in the **Settings...** dialog:
 - **Extra sockseek flags** are passed to every run: any flag from `sockseek --help`, for example `--fast-search`
   or `--desperate`.
 - **VPN**: see [VPN](#vpn) below.
-- **ffmpeg program** and the sockseek program (`[sockseek] executable` in `config.toml`) are empty by default,
-  which means the ones shipped with the application.
+- The sockseek program (`[sockseek] executable` in `config.toml`) is empty by default, which means the one
+  shipped with the application. ffmpeg is always the shipped one.
 
 ## VPN
 

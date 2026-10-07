@@ -109,16 +109,13 @@ def executable_name(name: str) -> str:
     return f"{name}.exe" if sys.platform == "win32" else name
 
 
-def find_ffmpeg(configured_executable: str = "") -> str | None:
+def find_ffmpeg() -> str | None:
     """
     Locate the ffmpeg program used for conversions.
 
-    :param configured_executable: Name or path chosen in the settings; empty to use the ffmpeg shipped with the
-        application, or failing that the one on the PATH
-    :returns: Path of the program, ``None`` when there is none
+    :returns: Path of the ffmpeg shipped with the application, or failing that of the one on the PATH; ``None``
+        when there is none
     """
-    if configured_executable:
-        return shutil.which(configured_executable)
     try:
         return imageio_ffmpeg.get_ffmpeg_exe()
     except RuntimeError:

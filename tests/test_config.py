@@ -26,7 +26,6 @@ def test_settings_survive_a_save_and_load(tmp_path):
         extra_arguments=("--fast-search", "--search-timeout", "8000"),
         vpn_mode=VPN_MODE_MANUAL,
         mp3_bitrate=256,
-        ffmpeg_executable="my-ffmpeg",
         relaxed_search=False,
     )
     path = save_settings(settings, tmp_path / "nested" / "config.toml")
@@ -49,14 +48,13 @@ def test_downloads_go_through_the_vpn_unless_the_settings_clearly_say_otherwise(
 
 def test_shipped_programs_and_user_data_folder_are_the_defaults(tmp_path):
     """
-    A minimal settings file uses the shipped sockseek and ffmpeg, the usual VPN client location, and keeps the
-    download history in the user data folder.
+    A minimal settings file uses the shipped sockseek, the usual VPN client location, and keeps the download
+    history in the user data folder.
     """
     path = tmp_path / "config.toml"
     path.write_text(MINIMAL_SETTINGS, encoding="utf-8")
     settings = load_settings(path)
     assert settings.sockseek_executable == bundled_sockseek()
-    assert settings.ffmpeg_executable == ""
     assert settings.piactl_executable == default_piactl_executable()
     assert settings.index_path == user_data_directory() / "data" / "sockseek_index.csv"
 

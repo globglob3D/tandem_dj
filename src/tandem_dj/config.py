@@ -39,8 +39,6 @@ class Settings:
     :param piactl_executable: Path of the Private Internet Access command line tool
     :param convert_to_mp3: Whether downloads in another format are converted to MP3
     :param mp3_bitrate: Bitrate, in kbps, of converted MP3 files
-    :param ffmpeg_executable: Name or path of the ffmpeg program used for conversions; empty for the one shipped
-        with the application
     """
 
     soulseek_username: str
@@ -56,7 +54,6 @@ class Settings:
     piactl_executable: Path = field(default_factory=default_piactl_executable)
     convert_to_mp3: bool = True
     mp3_bitrate: int = 320
-    ffmpeg_executable: str = ""
     relaxed_search: bool = True
 
 
@@ -101,7 +98,6 @@ def load_settings(config_path: Path | None = None) -> Settings:
         piactl_executable=_resolve_path(vpn["piactl"]) if vpn.get("piactl") else default_piactl_executable(),
         convert_to_mp3=bool(conversion.get("to_mp3", True)),
         mp3_bitrate=int(conversion.get("mp3_bitrate", 320)),
-        ffmpeg_executable=str(conversion.get("ffmpeg", "")),
         relaxed_search=bool(download.get("relaxed_search", True)),
     )
 
@@ -151,7 +147,6 @@ def save_settings(settings: Settings, config_path: Path | None = None) -> Path:
             piactl_executable=_quote(_portable_path(settings.piactl_executable)),
             convert_to_mp3=_boolean(settings.convert_to_mp3),
             mp3_bitrate=settings.mp3_bitrate,
-            ffmpeg_executable=_quote(settings.ffmpeg_executable),
             relaxed_search=_boolean(settings.relaxed_search),
         ),
         encoding="utf-8",
@@ -271,7 +266,4 @@ piactl = {piactl_executable}
 # MP3 once the download is over, keeping tags and cover art. The original is deleted after a successful conversion.
 to_mp3 = {convert_to_mp3}
 mp3_bitrate = {mp3_bitrate}
-
-# Name or path of another ffmpeg program; empty to use the one shipped with the application.
-ffmpeg = {ffmpeg_executable}
 """

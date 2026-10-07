@@ -97,7 +97,7 @@ def test_only_recent_log_files_are_kept(tmp_path):
     assert (directory / "notes.txt").exists()
 
 
-def test_setup_description_flags_what_is_missing_and_never_shows_the_password(tmp_path):
+def test_setup_description_flags_what_is_missing_and_never_shows_the_password(tmp_path, monkeypatch):
     """
     The description logged at every launch names missing programs and leaves the password out.
     """
@@ -108,8 +108,8 @@ def test_setup_description_flags_what_is_missing_and_never_shows_the_password(tm
         output_directory=tmp_path / "output",
         sockseek_executable=tmp_path / "missing-sockseek",
         piactl_executable=tmp_path / "missing-piactl",
-        ffmpeg_executable="no-such-ffmpeg-program",
     )
+    monkeypatch.setattr("tandem_dj.diagnostics.find_ffmpeg", lambda: None)
     text = "\n".join(describe_setup(settings, tmp_path / "config.toml"))
     assert "running from source" in text
     assert "Soulseek account: tester" in text

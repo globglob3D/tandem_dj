@@ -55,10 +55,8 @@ def test_resource_directory_is_the_unpacked_application_when_packaged(monkeypatc
     assert paths.resource_directory() == tmp_path
 
 
-def test_find_ffmpeg_uses_the_shipped_program_unless_told_otherwise():
+def test_find_ffmpeg_finds_the_shipped_program():
     """
-    Without a configured program the shipped ffmpeg is found; a configured one that does not exist is not replaced.
+    The ffmpeg shipped with the application is the one used for conversions.
     """
     assert Path(paths.find_ffmpeg()).is_file()
-    assert paths.find_ffmpeg("no-such-ffmpeg-program") is None
-    assert paths.find_ffmpeg(sys.executable) is not None
