@@ -104,7 +104,8 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 - `_log()` writes to the log file as well as the log pane. `write_log()` alone records details that would clutter
   the pane, such as the full list of tracks sent.
 - Closing the window during a download stops sockseek first and waits for the worker, so the VPN guard always
-  gets to disconnect.
+  gets to disconnect. On macOS, Cmd+Q and the Quit menu go through the same `_on_close()` (`tk::mac::Quit`);
+  without that, Tk would end the application at once and leave the VPN connected.
 - The worker asks the user a question with `_confirm()`: it queues a `confirm` message holding an `_Answer` and
   waits on its event while the window thread shows the box (warning icon, No as the default button).
 - Looks live in `ui/theme.py` only (ttk `clam` theme recoloured; plain `tkinter.Text` widgets need

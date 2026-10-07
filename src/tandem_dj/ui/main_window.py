@@ -4,6 +4,7 @@ The main window: paste links, check the parsed tracks, download them and follow 
 
 import logging
 import queue
+import sys
 import threading
 import tkinter
 from pathlib import Path
@@ -110,6 +111,8 @@ class MainWindow(tkinter.Tk):
         self._build_summary_bar()
         self._build_log()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        if sys.platform == "darwin":
+            self.createcommand("tk::mac::Quit", self._on_close)
         self._set_busy(False)
         self._load_settings()
         self.after(REFRESH_INTERVAL_MILLISECONDS, self._refresh)
