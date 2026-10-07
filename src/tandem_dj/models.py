@@ -4,6 +4,9 @@ Data structures shared by every track source and by the downloader.
 
 from dataclasses import dataclass, field
 
+TEXT_ORIGIN = "text"
+TYPED_TRACKS_LABEL = "Typed tracks"
+
 
 @dataclass(frozen=True)
 class Track:
@@ -58,8 +61,10 @@ class TrackCollection:
     """
     A named list of tracks read from one source, such as a playlist.
 
-    :param name: Human readable name, such as the playlist title
-    :param origin: Name of the source that produced the collection (``spotify``, ``youtube``, ...)
+    :param name: Name the source gives to the collection, such as the playlist title; empty when it gives none,
+        as for typed tracks
+    :param origin: Name of the source that produced the collection (``spotify``, ``youtube``, ...), or
+        :data:`TEXT_ORIGIN`
     :param tracks: The tracks, in the order of the source
     :param url: Link to the collection on its platform, empty when it has none
     :param warnings: Problems worth showing to the user, such as an incomplete listing
@@ -70,3 +75,12 @@ class TrackCollection:
     tracks: list[Track] = field(default_factory=list)
     url: str = ""
     warnings: list[str] = field(default_factory=list)
+
+    @property
+    def display_name(self) -> str:
+        """
+        Return what to call the collection in front of the user.
+
+        :returns: The name, otherwise the link, otherwise a label saying the tracks were typed
+        """
+        return self.name or self.url or TYPED_TRACKS_LABEL

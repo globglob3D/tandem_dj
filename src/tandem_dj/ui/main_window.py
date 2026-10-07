@@ -14,7 +14,7 @@ from types import TracebackType
 from tandem_dj.config import ConfigurationError, Settings, default_settings, load_settings
 from tandem_dj.diagnostics import describe_setup
 from tandem_dj.logs import current_log_path, hide_secret, write_error_log, write_log
-from tandem_dj.models import Track, TrackCollection
+from tandem_dj.models import TEXT_ORIGIN, Track, TrackCollection
 from tandem_dj.paths import APPLICATION_NAME, log_directory, open_folder
 from tandem_dj.progress import (
     STATUS_ALREADY_DOWNLOADED,
@@ -54,7 +54,6 @@ WINDOW_TITLE = APPLICATION_NAME
 WINDOW_SIZE = "1400x800"
 PROGRESS_BAR_CELLS = 10
 REFRESH_INTERVAL_MILLISECONDS = 300
-TYPED_COLLECTION_NAME = "typed_tracks"
 VPN_MESSAGE_PREFIX = "VPN: "
 LOG_FILE_LEVELS = {
     LEVEL_INFORMATION: logging.INFO,
@@ -93,7 +92,7 @@ class MainWindow(tkinter.Tk):
         self.config_path = config_path
         self.settings = default_settings()
         self.requested_tracks: list[Track] = []
-        self.collection_name = TYPED_COLLECTION_NAME
+        self.collection = TrackCollection(name="", origin=TEXT_ORIGIN)
         self.read_input = ""
         self.tracker: ProgressTracker | None = None
         self.worker: threading.Thread | None = None
@@ -370,15 +369,16 @@ class MainWindow(tkinter.Tk):
         if len(lines) == 1:
             collection = read_tracks(lines[0])
         else:
-            collection = read_track_lines(lines, name=TYPED_COLLECTION_NAME)
+            collection = read_track_lines(lines)
         for warning in collection.warnings:
             self._log(f"warning: {warning}", LEVEL_WARNING)
         unique_tracks = remove_duplicates(collection.tracks)
         duplicate_count = len(collection.tracks) - len(unique_tracks)
         already_downloaded = find_already_downloaded(unique_tracks, settings.index_path)
         self._log(
-            f"{collection.name}  [{collection.origin}, {len(collection.tracks)} tracks]: {len(unique_tracks)} to send "
-            f"to sockseek, {duplicate_count} duplicates left out, {len(already_downloaded)} already downloaded.",
+            f"{collection.display_name}  [{collection.origin}, {len(collection.tracks)} tracks]: "
+            f"{len(unique_tracks)} to send to sockseek, {duplicate_count} duplicates left out, "
+            f"{len(already_downloaded)} already downloaded.",
             LEVEL_SUCCESS,
         )
         write_log("Tracks as sent to sockseek (artist | title | length in seconds):")
@@ -386,7 +386,7 @@ class MainWindow(tkinter.Tk):
             sent_values = input_row(track)
             write_log(f"  {number:>3}. {sent_values['Artist']} | {sent_values['Title']} | {sent_values['Length']}")
         self.requested_tracks = unique_tracks
-        self.collection_name = collection.name
+        self.collection = collection
         self.read_input = pasted_text
         self.messages.put(("tracks", collection, unique_tracks, duplicate_count, already_downloaded))
 
@@ -402,7 +402,7 @@ class MainWindow(tkinter.Tk):
         tracker = ProgressTracker(self.requested_tracks)
         self.messages.put(("tracker", tracker))
         downloader = SockseekDownloader(settings)
-        input_path = downloader.input_path_for(self.collection_name)
+        input_path = downloader.input_path_for(self.collection.display_name)
         self._log(
             f"sockseek command: {downloader.describe_command(input_path, self.requested_tracks)}", LEVEL_INFORMATION
         )
@@ -420,7 +420,7 @@ class MainWindow(tkinter.Tk):
         report = run_download(
             settings,
             self.requested_tracks,
-            self.collection_name,
+            self.collection.display_name,
             notify=self._log,
             confirm=self._confirm,
             on_output_line=handle_output_line,
@@ -563,7 +563,7 @@ class MainWindow(tkinter.Tk):
             )
             self.table.insert("", "end", iid=_row_identifier(track), values=values, tags=(status,))
         self.source_label.configure(
-            text=f"{collection.name}  [{collection.origin}]  -  {len(tracks)} tracks to send to sockseek, "
+            text=f"{collection.display_name}  [{collection.origin}]  -  {len(tracks)} tracks to send to sockseek, "
             f"{duplicate_count} duplicates left out, {len(already_downloaded)} already downloaded"
         )
         self.overall_bar.configure(maximum=max(len(tracks), 1), value=0)

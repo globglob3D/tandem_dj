@@ -6,7 +6,7 @@ Nothing here touches the network: website responses are represented by small sam
 
 import pytest
 
-from tandem_dj.models import Track
+from tandem_dj.models import Track, TrackCollection
 from tandem_dj.sources import SourceError, read_track_lines, read_tracks
 from tandem_dj.sources.soundcloud import SoundCloudSource, _track_from_description
 from tandem_dj.sources.spotify import SpotifySource, _track_from_playlist_item, _tracks_from_embed_list
@@ -79,9 +79,20 @@ def test_read_tracks_from_text_file(tmp_path):
 
 def test_literal_reference_is_one_track():
     """
-    Text that is neither a link nor a file is a single song to look for.
+    Text that is neither a link nor a file is a single song to look for, in a collection without a name.
     """
-    assert read_tracks("Darude - Feel the Beat").tracks == [Track(artists=("Darude",), title="Feel the Beat")]
+    collection = read_tracks("Darude - Feel the Beat")
+    assert collection.tracks == [Track(artists=("Darude",), title="Feel the Beat")]
+    assert (collection.name, collection.origin, collection.display_name) == ("", "text", "Typed tracks")
+
+
+def test_collection_without_a_name_is_shown_by_its_link():
+    """
+    A playlist whose title could not be read is called by its link in front of the user, and by its title otherwise.
+    """
+    link = "https://open.spotify.com/playlist/5Q8ljADP201Tj4r2VMrJ7t"
+    assert TrackCollection(name="", origin="spotify", url=link).display_name == link
+    assert TrackCollection(name="Son 2 Teuf", origin="spotify", url=link).display_name == "Son 2 Teuf"
 
 
 def test_read_track_lines_keeps_order():

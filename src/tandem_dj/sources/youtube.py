@@ -48,7 +48,7 @@ class YouTubeSource(TrackSource):
 
         entries = list(information.get("entries") or []) if information.get("_type") == "playlist" else [information]
         collection = TrackCollection(
-            name=normalize_text(information.get("title") or reference),
+            name=normalize_text(information.get("title") or ""),
             origin=self.name,
             url=information.get("webpage_url") or reference,
         )

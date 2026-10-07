@@ -8,7 +8,7 @@ Everything tracks can be read from: Spotify, YouTube, SoundCloud and hand-writte
 from collections.abc import Iterable
 from pathlib import Path
 
-from tandem_dj.models import TrackCollection
+from tandem_dj.models import TEXT_ORIGIN, TrackCollection
 from tandem_dj.sources.base import SourceError, TrackSource
 from tandem_dj.sources.soundcloud import SoundCloudSource
 from tandem_dj.sources.spotify import SpotifySource
@@ -18,7 +18,6 @@ from tandem_dj.sources.youtube import YouTubeSource
 __all__ = ["WEBSITE_SOURCES", "SourceError", "read_track_lines", "read_tracks"]
 
 WEBSITE_SOURCES: tuple[TrackSource, ...] = (SpotifySource(), YouTubeSource(), SoundCloudSource())
-TEXT_ORIGIN = "text"
 
 
 def read_tracks(reference: str) -> TrackCollection:
@@ -39,15 +38,16 @@ def read_tracks(reference: str) -> TrackCollection:
     path = Path(reference)
     if path.is_file():
         return read_track_lines(path.read_text(encoding="utf-8-sig").splitlines(), name=path.stem)
-    return read_track_lines([reference], name=reference)
+    return read_track_lines([reference])
 
 
-def read_track_lines(lines: Iterable[str], name: str) -> TrackCollection:
+def read_track_lines(lines: Iterable[str], name: str = "") -> TrackCollection:
     """
     Read hand-written lines, each one a track or a link to more tracks.
 
     :param lines: Lines of the form ``Artist - Title``, or links to playlists, albums and tracks
-    :param name: Name to give to the resulting collection
+    :param name: Name to give to the resulting collection, such as the name of the file holding the lines; empty
+        for lines that were typed
     :returns: The tracks of every line, in order
     :raises SourceError: If a linked website cannot be read
     """

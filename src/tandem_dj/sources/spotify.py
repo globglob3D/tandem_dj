@@ -60,9 +60,7 @@ class SpotifySource(TrackSource):
         try:
             with httpx.Client(headers=headers, timeout=REQUEST_TIMEOUT_SECONDS, follow_redirects=True) as client:
                 entity, access_token = _fetch_embed(client, kind, identifier)
-                collection = TrackCollection(
-                    name=normalize_text(entity.get("name") or identifier), origin=self.name, url=url
-                )
+                collection = TrackCollection(name=normalize_text(entity.get("name") or ""), origin=self.name, url=url)
                 if kind == "track":
                     collection.tracks = [_track_from_embed_entity(entity)]
                 elif kind == "album":

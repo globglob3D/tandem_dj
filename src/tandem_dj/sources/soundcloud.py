@@ -70,7 +70,7 @@ class SoundCloudSource(TrackSource):
             raise SourceError(f"Could not reach SoundCloud: {error}") from error
 
         collection = TrackCollection(
-            name=normalize_text(resource.get("title") or url),
+            name=normalize_text(resource.get("title") or ""),
             origin=self.name,
             url=resource.get("permalink_url") or url,
         )
