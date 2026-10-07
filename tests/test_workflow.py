@@ -13,14 +13,22 @@ from tandem_dj.config import Settings, default_settings
 from tandem_dj.models import Track
 from tandem_dj.paths import bundled_sockseek, find_ffmpeg
 from tandem_dj.progress import STATUS_DOWNLOADED, STATUS_FAILED, ProgressTracker
-from tandem_dj.sockseek import DownloadReport, SockseekDownloader
+from tandem_dj.sockseek import DownloadReport, SockseekDownloader, find_already_downloaded
 from tandem_dj.vpn import VPN_MODE_NONE, VisibleLocation
-from tandem_dj.workflow import LEVEL_ERROR, LEVEL_WARNING, DownloadCancelled, run_download
+from tandem_dj.workflow import (
+    LEVEL_ERROR,
+    LEVEL_WARNING,
+    DownloadCancelled,
+    DownloadControl,
+    TrackRequest,
+    run_download,
+)
 
 SOCKSEEK_EXECUTABLE = bundled_sockseek()
 FFMPEG = find_ffmpeg()
 HOME_LOCATION = VisibleLocation("203.0.113.10", "Paris, FR", "Home Internet Provider")
 TRACK = Track(artists=("Darude",), title="Feel the Beat")
+OTHER_TRACK = Track(artists=("Daniel Avery",), title="Naive Response")
 
 
 class RecordingDownloader(SockseekDownloader):
@@ -31,6 +39,7 @@ class RecordingDownloader(SockseekDownloader):
     """
 
     runs: list[list[Track]] = []
+    sources: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
     checks_before_stopping = 0
 
     def check_ready(self) -> None:
@@ -49,6 +58,7 @@ class RecordingDownloader(SockseekDownloader):
         :returns: A report where every track is downloaded, stopped early if the condition failed
         """
         type(self).runs.append(list(tracks))
+        type(self).sources.append((self.preferred_sources, self.avoided_sources))
         report = DownloadReport(downloaded=list(tracks))
         for _ in range(type(self).checks_before_stopping):
             if keep_running is not None and not keep_running():
@@ -63,6 +73,7 @@ def recording_downloader(monkeypatch):
     Replace sockseek by a recorder and the outside address lookup by a fixed home location.
     """
     RecordingDownloader.runs = []
+    RecordingDownloader.sources = []
     RecordingDownloader.checks_before_stopping = 0
     monkeypatch.setattr(workflow, "SockseekDownloader", RecordingDownloader)
     monkeypatch.setattr(workflow, "lookup_visible_location", lambda: HOME_LOCATION)
@@ -240,6 +251,141 @@ def test_download_without_handled_vpn_stops_when_the_visible_address_changes(
         "VPN: the address the internet sees changed to 198.51.100.99, so sockseek was stopped.",
         LEVEL_ERROR,
     )
+
+
+def test_requests_queued_meanwhile_are_fulfilled_by_the_download_in_progress(tmp_path, recording_downloader):
+    """
+    Requests added while a download runs are fulfilled one after the other before it ends, each with its own
+    sources to prefer or to avoid, and the user is only asked once. The report holds the last word on each track.
+    """
+    control = DownloadControl()
+    preferring = TrackRequest((OTHER_TRACK,), preferred_sources=("good peer",))
+    avoiding = TrackRequest((TRACK,), avoided_sources=("slow peer",))
+    control.add_request(preferring)
+    control.add_request(avoiding)
+    assert control.queued_tracks() == [OTHER_TRACK, TRACK]
+    questions: list[str] = []
+    fulfilled: list[TrackRequest] = []
+    report = run_download(
+        make_settings(tmp_path, VPN_MODE_NONE),
+        [TRACK],
+        "list",
+        batch_directory(tmp_path),
+        lambda message, level: None,
+        lambda question: bool(questions.append(question)) or True,
+        control=control,
+        on_request=fulfilled.append,
+    )
+    assert recording_downloader.runs == [[TRACK], [OTHER_TRACK], [TRACK]]
+    assert recording_downloader.sources == [((), ()), (("good peer",), ()), ((), ("slow peer",))]
+    assert fulfilled == [TrackRequest((TRACK,)), preferring, avoiding]
+    assert len(questions) == 1
+    assert report.downloaded == [OTHER_TRACK, TRACK]
+    assert control.next_request() is None
+
+    control.add_request(preferring)
+    control.clear_requests()
+    assert control.queued_tracks() == []
+
+
+def test_a_source_can_only_be_skipped_while_a_download_runs(tmp_path, recording_downloader, monkeypatch):
+    """
+    The control passes a source to skip to the downloader of the download in progress, and refuses when there is
+    none.
+    """
+    control = DownloadControl()
+    skipped: list[tuple[bool, tuple[str, ...]]] = []
+
+    class SkippingDownloader(recording_downloader):
+        """
+        A downloader during whose run a source is skipped.
+
+        :param settings: User settings
+        """
+
+        def download(self, tracks, name, keep_running=None, on_output_line=None) -> DownloadReport:
+            """
+            Skip a source through the control, as the window does during a download.
+
+            :param tracks: Tracks to download
+            :param name: Name of the batch
+            :param keep_running: Unused
+            :param on_output_line: Unused
+            :returns: A report where every track is downloaded
+            """
+            skipped.append((control.skip_source("slow peer"), self.skipped_sources))
+            return DownloadReport(downloaded=list(tracks))
+
+    monkeypatch.setattr(workflow, "SockseekDownloader", SkippingDownloader)
+    assert not control.skip_source("slow peer")
+    run_download(
+        make_settings(tmp_path, VPN_MODE_NONE),
+        [TRACK],
+        "list",
+        batch_directory(tmp_path),
+        lambda message, level: None,
+        lambda question: True,
+        control=control,
+    )
+    assert skipped == [(True, ("slow peer",))]
+    assert not control.skip_source("slow peer")
+
+
+@pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file(), reason="sockseek is not installed in vendor/sockseek")
+def test_downloading_a_track_again_replaces_its_file_or_keeps_it(tmp_path, monkeypatch):
+    """
+    A track that has a file is downloaded again when the request says so. The earlier file is deleted, with its
+    folder when that empties it, once another file was downloaded; when nothing else is found, the earlier file
+    stays the file of the track.
+    """
+    monkeypatch.setattr(workflow, "lookup_visible_location", lambda: HOME_LOCATION)
+    shared_files = tmp_path / "shared"
+    shared_files.mkdir()
+    (shared_files / "Darude - Feel the Beat.mp3").write_bytes(b"not really audio")
+    settings = dataclasses.replace(
+        make_settings(tmp_path, VPN_MODE_NONE),
+        extra_arguments=("--mock-files-dir", str(shared_files), "--mock-files-no-read-tags"),
+    )
+    first_batch, second_batch, third_batch = (batch_directory(tmp_path, name) for name in ("first", "second", "third"))
+    notifications: list[str] = []
+
+    def download(batch: Path, request: TrackRequest | None = None) -> DownloadReport:
+        """
+        Download the track into a folder, answering yes to the question asked first.
+
+        :param batch: Folder of the batch
+        :param request: How to download the track, when it is not the plain way
+        :returns: The outcome of the track
+        """
+        return run_download(
+            settings,
+            [TRACK],
+            "list",
+            batch,
+            lambda message, level: notifications.append(message),
+            lambda question: True,
+            request=request,
+        )
+
+    earlier_file = Path(download(first_batch).saved_files[TRACK])
+    assert earlier_file.parent == first_batch
+    assert download(second_batch).already_downloaded == [TRACK]
+
+    report = download(second_batch, TrackRequest((TRACK,), preferred_sources=("local",), replace_files=True))
+    new_file = Path(report.saved_files[TRACK])
+    assert report.downloaded == [TRACK]
+    assert new_file.parent == second_batch and new_file.is_file()
+    assert not earlier_file.exists() and not first_batch.exists()
+    assert "Replaced Darude - Feel the Beat.mp3 (in first) with Darude - Feel the Beat.mp3" in notifications[-1]
+    assert Path(find_already_downloaded([TRACK], settings.index_path)[TRACK]) == new_file
+
+    report = download(third_batch, TrackRequest((TRACK,), avoided_sources=("local",), replace_files=True))
+    assert (report.already_downloaded, report.downloaded, report.failed) == ([TRACK], [], [])
+    assert Path(report.saved_files[TRACK]) == new_file and new_file.is_file()
+    assert report.notes[TRACK] == "no other file was downloaded: Darude - Feel the Beat.mp3 is kept, in second"
+    assert "no other file was downloaded, so Darude - Feel the Beat.mp3 is kept." in notifications[-1]
+    assert not third_batch.exists()
+    assert Path(find_already_downloaded([TRACK], settings.index_path)[TRACK]) == new_file
 
 
 @pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file() or FFMPEG is None, reason="needs sockseek and ffmpeg")

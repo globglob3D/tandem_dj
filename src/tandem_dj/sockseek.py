@@ -338,6 +338,7 @@ class DownloadReport:
     :param saved_files: Path each downloaded or already downloaded track was saved to, as recorded by sockseek
     :param relaxed_matches: Spelling that found each track which was not found under its exact name; such files
         deserve a check by the user
+    :param notes: What else there is to tell the user about a track, shown in place of the usual details
     :param exit_code: Exit code of the sockseek process
     :param stopped_early: Whether sockseek was stopped because the condition to keep running stopped holding
     """
@@ -348,8 +349,40 @@ class DownloadReport:
     not_attempted: list[Track] = field(default_factory=list)
     saved_files: dict[Track, str] = field(default_factory=dict)
     relaxed_matches: dict[Track, SearchVariant] = field(default_factory=dict)
+    notes: dict[Track, str] = field(default_factory=dict)
     exit_code: int = 0
     stopped_early: bool = False
+
+    @property
+    def tracks(self) -> list[Track]:
+        """
+        List every track this report tells about.
+
+        :returns: The downloaded, already downloaded, failed and unfinished tracks together
+        """
+        return self.downloaded + self.already_downloaded + self.failed + self.not_attempted
+
+    def merge(self, later_report: "DownloadReport") -> None:
+        """
+        Take over what a later run found out about its tracks, in place of what this report said about them.
+
+        :param later_report: Outcome of a run made after the ones this report covers
+        """
+        later_tracks = set(later_report.tracks)
+        for outcome in (self.downloaded, self.already_downloaded, self.failed, self.not_attempted):
+            outcome[:] = [track for track in outcome if track not in later_tracks]
+        for details in (self.saved_files, self.relaxed_matches, self.notes):
+            for track in later_tracks:
+                details.pop(track, None)
+        self.downloaded += later_report.downloaded
+        self.already_downloaded += later_report.already_downloaded
+        self.failed += later_report.failed
+        self.not_attempted += later_report.not_attempted
+        self.saved_files.update(later_report.saved_files)
+        self.relaxed_matches.update(later_report.relaxed_matches)
+        self.notes.update(later_report.notes)
+        self.exit_code = later_report.exit_code
+        self.stopped_early = self.stopped_early or later_report.stopped_early
 
 
 @dataclass(frozen=True)
@@ -621,10 +654,7 @@ def repair_index(index_path: Path) -> int:
     """
     if not index_path.is_file():
         return 0
-    with index_path.open(encoding="utf-8-sig", newline="") as file:
-        reader = csv.DictReader(file)
-        columns = reader.fieldnames or []
-        rows = list(reader)
+    columns, rows = _read_index_rows(index_path)
     kept_rows: dict[tuple[str, ...], dict[str, str]] = {}
     kept_entries: dict[tuple[str, ...], IndexEntry] = {}
     for row in rows:
@@ -637,10 +667,7 @@ def repair_index(index_path: Path) -> int:
             kept_entries[key] = entry
     removed_count = len(rows) - len(kept_rows)
     if removed_count:
-        with index_path.open("w", encoding="utf-8", newline="") as file:
-            writer = csv.DictWriter(file, fieldnames=columns, lineterminator="\n")
-            writer.writeheader()
-            writer.writerows(kept_rows.values())
+        _write_index_rows(index_path, columns, list(kept_rows.values()))
     return removed_count
 
 
@@ -655,12 +682,7 @@ def record_downloads(index_path: Path, saved_files: Mapping[Track, str]) -> None
     """
     if not saved_files:
         return
-    columns, rows = list(INDEX_COLUMNS), []
-    if index_path.is_file():
-        with index_path.open(encoding="utf-8-sig", newline="") as file:
-            reader = csv.DictReader(file)
-            columns = list(reader.fieldnames or INDEX_COLUMNS)
-            rows = list(reader)
+    columns, rows = _read_index_rows(index_path)
     for track, file_path in saved_files.items():
         key = track_key(track.primary_artist, track.title)
         track_rows = [row for row in rows if track_key(row["artist"], row["title"]) == key]
@@ -677,6 +699,48 @@ def record_downloads(index_path: Path, saved_files: Mapping[Track, str]) -> None
             rows.extend(track_rows)
         for row in track_rows:
             row.update(filepath=file_path, state=INDEX_STATE_DOWNLOADED, failurereason=INDEX_NO_FAILURE)
+    _write_index_rows(index_path, columns, rows)
+
+
+def forget_downloads(index_path: Path, tracks: Sequence[Track]) -> dict[Track, str]:
+    """
+    Remove tracks from the download history, so that sockseek downloads them again. Their files are left alone.
+
+    :param index_path: Index file written by sockseek
+    :param tracks: Tracks to download again
+    :returns: The file each of those tracks had, for the tracks whose file is still there
+    """
+    earlier_files = find_already_downloaded(tracks, index_path)
+    if earlier_files:
+        forgotten_keys = {track_key(track.primary_artist, track.title) for track in earlier_files}
+        columns, rows = _read_index_rows(index_path)
+        kept_rows = [row for row in rows if track_key(row["artist"], row["title"]) not in forgotten_keys]
+        _write_index_rows(index_path, columns, kept_rows)
+    return earlier_files
+
+
+def _read_index_rows(index_path: Path) -> tuple[list[str], list[dict[str, str]]]:
+    """
+    Read every row of the sockseek index as it is written.
+
+    :param index_path: Index file written by sockseek
+    :returns: The column names and the rows; the usual columns and no row when there is no index yet
+    """
+    if not index_path.is_file():
+        return list(INDEX_COLUMNS), []
+    with index_path.open(encoding="utf-8-sig", newline="") as file:
+        reader = csv.DictReader(file)
+        return list(reader.fieldnames or INDEX_COLUMNS), list(reader)
+
+
+def _write_index_rows(index_path: Path, columns: Sequence[str], rows: Sequence[Mapping[str, str]]) -> None:
+    """
+    Write the sockseek index, replacing its content.
+
+    :param index_path: Index file to write, created along with its folder
+    :param columns: Column names, in order
+    :param rows: Rows to write
+    """
     index_path.parent.mkdir(parents=True, exist_ok=True)
     with index_path.open("w", encoding="utf-8", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=columns, lineterminator="\n", restval="", extrasaction="ignore")

@@ -2,14 +2,18 @@
 The download procedure: VPN, sockseek, then conversion.
 """
 
+import contextlib
+import threading
+from collections import deque
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from tandem_dj.config import Settings
 from tandem_dj.conversion import ConversionError, convert_to_mp3, needs_conversion
 from tandem_dj.models import Track
 from tandem_dj.search_variants import SearchVariant, relaxed_search_variants
-from tandem_dj.sockseek import DownloadReport, SockseekDownloader
+from tandem_dj.sockseek import DownloadReport, SockseekDownloader, forget_downloads, record_downloads
 from tandem_dj.text_cleaning import track_key
 from tandem_dj.vpn import (
     VPN_MODE_NONE,
@@ -44,6 +48,7 @@ Notify = Callable[[str, str], None]
 Confirm = Callable[[str], bool]
 OutputLineReceiver = Callable[[str], None]
 SearchVariantsReceiver = Callable[[Mapping[Track, SearchVariant]], None]
+RequestReceiver = Callable[["TrackRequest"], None]
 
 
 def run_download(
@@ -56,12 +61,17 @@ def run_download(
     on_output_line: OutputLineReceiver | None = None,
     keep_running: Callable[[], bool] | None = None,
     on_search_variants: SearchVariantsReceiver | None = None,
+    request: "TrackRequest | None" = None,
+    control: "DownloadControl | None" = None,
+    on_request: RequestReceiver | None = None,
 ) -> DownloadReport:
     """
     Download tracks into the folder of their batch with the protection chosen in the settings, then convert the
     files that are not MP3.
 
-    Tracks that are not found are searched again under simpler spellings, when the settings allow it.
+    Tracks that are not found are searched again under simpler spellings, when the settings allow it. The requests
+    queued in ``control`` meanwhile are fulfilled before the protection ends, so that asking for one more track
+    during a download costs no second connection of the VPN.
 
     :param settings: User settings
     :param tracks: Tracks to download
@@ -74,6 +84,9 @@ def run_download(
     :param on_output_line: Receiver of every line sockseek prints
     :param keep_running: Extra condition checked every few seconds; sockseek is stopped once it returns ``False``
     :param on_search_variants: Told which spelling each track is searched under, before every further search
+    :param request: How to download the tracks, when it is not the plain way; its tracks replace ``tracks``
+    :param control: Where further requests are taken from, and what lets another thread act on the download
+    :param on_request: Told each request right before it is fulfilled
     :returns: The outcome of every requested track, with converted file names
     :raises DownloadError: If sockseek or the download folder is not available
     :raises VpnError: If the VPN cannot be connected or confirmed
@@ -84,24 +97,166 @@ def run_download(
 
     def download(may_continue: Callable[[], bool] | None) -> DownloadReport:
         """
-        Run sockseek on the tracks, then on simpler spellings of the ones it did not find.
+        Fulfil the first request, then the ones queued meanwhile, until none is left or the download is stopped.
 
         :param may_continue: Condition to keep sockseek running, as tightened by the VPN protection in use
         :returns: The outcome of every requested track
         """
-        report = downloader.download(tracks, name, may_continue, on_output_line)
-        if settings.relaxed_search:
-            search_failed_tracks_again(
-                downloader, report, name, notify, may_continue, on_output_line, on_search_variants
+        report = DownloadReport()
+        next_request = request or TrackRequest(tuple(tracks))
+        while next_request is not None:
+            if on_request is not None:
+                on_request(next_request)
+            report.merge(
+                fulfil_request(downloader, next_request, name, notify, may_continue, on_output_line, on_search_variants)
             )
+            if report.stopped_early or control is None or (may_continue is not None and not may_continue()):
+                break
+            next_request = control.next_request()
         return report
 
-    if settings.vpn_mode == VPN_MODE_NONE:
-        report = _download_at_own_responsibility(download, notify, confirm, keep_running)
-    else:
-        report = _download_behind_vpn(downloader, download, notify, keep_running)
+    with control.acting_on(downloader) if control is not None else contextlib.nullcontext():
+        if settings.vpn_mode == VPN_MODE_NONE:
+            report = _download_at_own_responsibility(download, notify, confirm, keep_running)
+        else:
+            report = _download_behind_vpn(downloader, download, notify, keep_running)
     if settings.convert_to_mp3:
         convert_downloads(report, settings, notify)
+    return report
+
+
+@dataclass(frozen=True)
+class TrackRequest:
+    """
+    Tracks to download, and what is particular about the way to download them.
+
+    :param tracks: Tracks to download
+    :param preferred_sources: Soulseek users whose files are picked first
+    :param avoided_sources: Soulseek users whose files are not considered
+    :param replace_files: Whether a track that already has a file is downloaded again, the new file replacing it
+    """
+
+    tracks: tuple[Track, ...]
+    preferred_sources: tuple[str, ...] = ()
+    avoided_sources: tuple[str, ...] = ()
+    replace_files: bool = False
+
+
+class DownloadControl:
+    """
+    What another thread uses to act on downloads: it queues requests, which the download in progress fulfils before
+    it ends, and makes that download leave a source.
+    """
+
+    def __init__(self) -> None:
+        self._requests: deque[TrackRequest] = deque()
+        self._downloader: SockseekDownloader | None = None
+        self._lock = threading.Lock()
+
+    def add_request(self, request: TrackRequest) -> None:
+        """
+        Queue a request for the download in progress, or for the next one.
+
+        :param request: Tracks to download, and how
+        """
+        with self._lock:
+            self._requests.append(request)
+
+    def next_request(self) -> TrackRequest | None:
+        """
+        Take the oldest queued request out of the queue.
+
+        :returns: The request, ``None`` when the queue is empty
+        """
+        with self._lock:
+            return self._requests.popleft() if self._requests else None
+
+    def queued_tracks(self) -> list[Track]:
+        """
+        List the tracks of the requests that are still queued.
+
+        :returns: The tracks, in the order they will be downloaded
+        """
+        with self._lock:
+            return [track for request in self._requests for track in request.tracks]
+
+    def clear_requests(self) -> None:
+        """
+        Drop every queued request.
+        """
+        with self._lock:
+            self._requests.clear()
+
+    def skip_source(self, username: str) -> bool:
+        """
+        Make the download in progress leave a Soulseek user, see :meth:`SockseekDownloader.skip_source`.
+
+        :param username: Soulseek user to leave out
+        :returns: ``False`` when no download is in progress
+        """
+        with self._lock:
+            downloader = self._downloader
+        if downloader is None:
+            return False
+        downloader.skip_source(username)
+        return True
+
+    @contextlib.contextmanager
+    def acting_on(self, downloader: SockseekDownloader):
+        """
+        Direct :meth:`skip_source` at a downloader for the duration of a ``with`` block.
+
+        :param downloader: Downloader of the download in progress
+        """
+        with self._lock:
+            self._downloader = downloader
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._downloader = None
+
+
+def fulfil_request(
+    downloader: SockseekDownloader,
+    request: TrackRequest,
+    name: str,
+    notify: Notify,
+    keep_running: Callable[[], bool] | None = None,
+    on_output_line: OutputLineReceiver | None = None,
+    on_search_variants: SearchVariantsReceiver | None = None,
+) -> DownloadReport:
+    """
+    Download the tracks of one request: under their exact name, then under simpler spellings when the settings
+    allow it, from the sources the request prefers and never from the ones it avoids.
+
+    When the request replaces files, the tracks that already have one are downloaded again. The earlier file of
+    such a track is deleted once another one was downloaded, and stays the file of the track otherwise.
+
+    :param downloader: Downloader configured with the user settings
+    :param request: Tracks to download, and how
+    :param name: Name of the batch
+    :param notify: Receiver of progress messages
+    :param keep_running: Condition to keep sockseek running
+    :param on_output_line: Receiver of every line sockseek prints
+    :param on_search_variants: Told which spelling each track is searched under, before every further search
+    :returns: The outcome of every track of the request
+    """
+    settings = downloader.settings
+    earlier_files = forget_downloads(settings.index_path, request.tracks) if request.replace_files else {}
+    downloader.preferred_sources, downloader.avoided_sources = request.preferred_sources, request.avoided_sources
+    try:
+        report = downloader.download(request.tracks, name, keep_running, on_output_line)
+        if settings.relaxed_search:
+            search_failed_tracks_again(
+                downloader, report, name, notify, keep_running, on_output_line, on_search_variants
+            )
+    except Exception:
+        record_downloads(settings.index_path, earlier_files)
+        raise
+    finally:
+        downloader.preferred_sources, downloader.avoided_sources = (), ()
+    _settle_replaced_files(report, earlier_files, settings, notify)
     return report
 
 
@@ -213,6 +368,47 @@ def _pick_searches(
             taken_keys.add(key)
             searches[track] = variant
     return searches
+
+
+def _settle_replaced_files(
+    report: DownloadReport, earlier_files: Mapping[Track, str], settings: Settings, notify: Notify
+) -> None:
+    """
+    Finish replacing the files of tracks that were downloaded again.
+
+    The earlier file of a track is deleted once another one was downloaded, along with its folder when that
+    leaves it empty. A track nothing was downloaded for keeps its earlier file and counts as already downloaded.
+
+    :param report: Outcome of the run that downloaded the tracks again; updated in place
+    :param earlier_files: File each track had before that run
+    :param settings: User settings
+    :param notify: Receiver of progress messages
+    """
+    for track, earlier_file in earlier_files.items():
+        earlier_path = Path(earlier_file)
+        if track in report.downloaded:
+            new_path = Path(report.saved_files[track])
+            if earlier_path.is_file() and earlier_path.resolve() != new_path.resolve():
+                with contextlib.suppress(OSError):
+                    earlier_path.unlink()
+                    if earlier_path.parent != settings.output_directory:
+                        earlier_path.parent.rmdir()
+                notify(
+                    f"Replaced {earlier_path.name} (in {earlier_path.parent.name}) with {new_path.name}; "
+                    "the earlier file was deleted.",
+                    LEVEL_INFORMATION,
+                )
+            continue
+        record_downloads(settings.index_path, {track: earlier_file})
+        for outcome in (report.failed, report.not_attempted):
+            if track in outcome:
+                outcome.remove(track)
+        report.already_downloaded.append(track)
+        report.saved_files[track] = earlier_file
+        report.notes[track] = (
+            f"no other file was downloaded: {earlier_path.name} is kept, in {earlier_path.parent.name}"
+        )
+        notify(f"{track.display_name}: no other file was downloaded, so {earlier_path.name} is kept.", LEVEL_WARNING)
 
 
 class DownloadCancelled(Exception):

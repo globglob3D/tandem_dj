@@ -16,9 +16,11 @@ from tandem_dj.paths import bundled_sockseek
 from tandem_dj.search_variants import SearchVariant
 from tandem_dj.sockseek import (
     DownloadError,
+    DownloadReport,
     SockseekDownloader,
     build_report,
     find_already_downloaded,
+    forget_downloads,
     record_downloads,
     remove_duplicates,
     repair_index,
@@ -222,6 +224,79 @@ def test_build_report_sorts_tracks_by_index_state(tmp_path):
         kept,
         converted,
     ]
+
+
+def test_a_later_report_replaces_what_was_known_about_its_tracks():
+    """
+    Merging the outcome of a later run moves its tracks to their new outcome, with their files, notes and
+    spellings, and leaves the other tracks alone.
+    """
+    kept, retried, replaced, stopped = (Track(artists=("Artist",), title=f"Song {number}") for number in range(4))
+    report = DownloadReport(
+        downloaded=[kept, replaced],
+        failed=[retried],
+        not_attempted=[stopped],
+        saved_files={kept: "D:/music/kept.mp3", replaced: "D:/music/first.mp3"},
+        relaxed_matches={replaced: SearchVariant("Artist", "Song 2", "without accents")},
+        notes={retried: "note of the first run"},
+    )
+    later_report = DownloadReport(
+        downloaded=[retried],
+        already_downloaded=[replaced],
+        saved_files={retried: "D:/music/retried.mp3", replaced: "D:/music/second.mp3"},
+        notes={replaced: "note of the second run"},
+        exit_code=1,
+    )
+    report.merge(later_report)
+    assert report.downloaded == [kept, retried]
+    assert report.already_downloaded == [replaced]
+    assert (report.failed, report.not_attempted) == ([], [stopped])
+    assert report.saved_files == {
+        kept: "D:/music/kept.mp3",
+        retried: "D:/music/retried.mp3",
+        replaced: "D:/music/second.mp3",
+    }
+    assert report.relaxed_matches == {}
+    assert report.notes == {replaced: "note of the second run"}
+    assert report.tracks == [kept, retried, replaced, stopped]
+    assert (report.exit_code, report.stopped_early) == (1, False)
+
+    report.merge(DownloadReport(not_attempted=[kept], stopped_early=True))
+    assert (report.downloaded, report.not_attempted, report.stopped_early) == ([retried], [stopped, kept], True)
+    assert kept not in report.saved_files
+
+
+def test_forgetting_downloads_makes_tracks_new_again_and_tells_their_files(tmp_path):
+    """
+    A track taken out of the download history no longer counts as downloaded, while its file is left where it is;
+    tracks that were not downloaded, or whose file is gone, are not concerned.
+    """
+    kept_file = save_file(tmp_path / "music" / "kept.mp3")
+    forgotten_file = save_file(tmp_path / "music" / "forgotten.mp3")
+    index_path = tmp_path / "index.csv"
+    header = "filepath,artist,album,title,length,tracktype,state,failurereason\n"
+    index_path.write_text(
+        header
+        + f"{kept_file},Old Favourite,,Kept,210,0,1,0\n"
+        + f"{forgotten_file},Daniel Avery,,Naive Response,414,0,1,0\n"
+        + ",Nobody Real,,Missing Song,200,0,2,9\n"
+        + f"{(tmp_path / 'music' / 'gone.mp3').as_posix()},Moved Away,,Lost Song,300,0,1,0\n",
+        encoding="utf-8",
+    )
+    forgotten = Track(artists=("Daniel Avery",), title="Naive Response")
+    failed = Track(artists=("Nobody Real",), title="Missing Song")
+    lost = Track(artists=("Moved Away",), title="Lost Song")
+    assert forget_downloads(index_path, [forgotten, failed, lost]) == {forgotten: forgotten_file}
+    assert find_already_downloaded([forgotten], index_path) == {}
+    assert (tmp_path / "music" / "forgotten.mp3").is_file()
+    assert index_path.read_text(encoding="utf-8") == (
+        header
+        + f"{kept_file},Old Favourite,,Kept,210,0,1,0\n"
+        + ",Nobody Real,,Missing Song,200,0,2,9\n"
+        + f"{(tmp_path / 'music' / 'gone.mp3').as_posix()},Moved Away,,Lost Song,300,0,1,0\n"
+    )
+    assert forget_downloads(index_path, [failed]) == {}
+    assert forget_downloads(tmp_path / "missing.csv", [forgotten]) == {}
 
 
 def test_run_while_stops_the_program_when_the_condition_fails():

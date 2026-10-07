@@ -30,7 +30,7 @@ src/tandem_dj/
   paths.py           user data folder, shipped files (sockseek, ffmpeg, assets), per-system defaults
   logs.py            one log file per launch, secrets masked, uncaught exceptions of every thread recorded
   diagnostics.py     describe_setup(): the description of the setup written at the top of every log
-  workflow.py        run_download(): VPN + sockseek + conversion
+  workflow.py        run_download(): VPN + sockseek + conversion; TrackRequest, DownloadControl
   batch_folder.py    batch_folder_name(): the folder of one download, named after playlist, website and time
   progress.py        ProgressTracker: per-track live state rebuilt from sockseek's JSON progress events
   ui/
@@ -101,6 +101,26 @@ Step 3 depends on `Settings.vpn_mode`:
   address cannot be read at all, the question says so and nothing is watched.
 
 A "no" raises `DownloadCancelled`, which the window logs without an error box.
+
+### Requests
+
+- What `run_download()` downloads is a `TrackRequest`: some tracks, the Soulseek users to prefer or to avoid, and
+  whether tracks that already have a file are downloaded again (`replace_files`). The plain Download button is the
+  request holding every track and nothing else. `fulfil_request()` runs one: exact search, then relaxed search.
+- A `DownloadControl` is the mailbox between the window and a running download. Requests added to it are
+  fulfilled by the download in progress, one after the other, **before the VPN protection ends**: one more track
+  costs no second VPN connection and no second warning box. Two sockseek processes never run at once.
+  `on_request` tells the caller which request starts. `control.skip_source()` reaches the downloader of the
+  download in progress (see "Things that are not obvious").
+- `DownloadReport.merge()` takes the word of a later run on its tracks; `run_download()` returns the merged
+  report of every request it fulfilled.
+- **Replacing a file never loses music.** `forget_downloads()` takes the tracks out of the history so that sockseek
+  fetches them again, and returns the file each one had. `_settle_replaced_files()` deletes that earlier file
+  only once another one was downloaded (and its folder when that empties it); otherwise the track goes back into
+  the history with its earlier file, counts as already downloaded, and `report.notes` says that nothing else was
+  found. The history is also restored when the run raises.
+- Measured in mock mode: sockseek overwrites a file of the same name in the output folder, so downloading again
+  into the same folder needs no deletion.
 
 ### The window
 
