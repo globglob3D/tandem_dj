@@ -17,6 +17,7 @@ from tandem_dj.sockseek import (
     build_report,
     find_already_downloaded,
     remove_duplicates,
+    repair_index,
     run_while,
     write_input_file,
 )
@@ -215,3 +216,65 @@ def test_download_with_real_sockseek_against_local_files(tmp_path):
     assert second_report.already_downloaded == [found]
     assert second_report.downloaded == []
     assert not second_report.stopped_early
+
+
+def test_repair_index_keeps_the_most_conclusive_row_per_track(tmp_path):
+    """
+    Leftover rows of interrupted runs are dropped, whatever their position; other tracks are untouched.
+    """
+    existing_file = tmp_path / "kept.mp3"
+    existing_file.write_bytes(b"audio")
+    index_path = tmp_path / "index.csv"
+    header = "filepath,artist,album,title,length,tracktype,state,failurereason\n"
+    index_path.write_text(
+        header
+        + "D:/x/a.mp3,Daniel Avery,,Naive Response,414,0,1,0\n"
+        + ",Daniel Avery,,Naive Response,414,0,0,0\n"
+        + ",Nobody Real,,Missing Song,200,0,0,0\n"
+        + ",Nobody Real,,Missing Song,200,0,2,9\n"
+        + f"{existing_file.as_posix()},Twice,,Saved,100,0,1,0\n"
+        + "D:/x/gone.flac,Twice,,Saved,100,0,1,0\n"
+        + '"D:/x/c, d.mp3",Datura,,"Yerba del Diablo, Pt. 3",427,0,3,0\n',
+        encoding="utf-8",
+    )
+    assert repair_index(index_path) == 3
+    assert index_path.read_text(encoding="utf-8") == (
+        header
+        + "D:/x/a.mp3,Daniel Avery,,Naive Response,414,0,1,0\n"
+        + ",Nobody Real,,Missing Song,200,0,2,9\n"
+        + f"{existing_file.as_posix()},Twice,,Saved,100,0,1,0\n"
+        + '"D:/x/c, d.mp3",Datura,,"Yerba del Diablo, Pt. 3",427,0,3,0\n'
+    )
+    assert repair_index(index_path) == 0
+    assert repair_index(tmp_path / "missing.csv") == 0
+
+
+@pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file(), reason="sockseek is not installed in vendor/sockseek")
+def test_interrupted_run_leftovers_do_not_cause_a_second_download(tmp_path):
+    """
+    A stale unfinished row placed after a success row, which sockseek alone would act on, no longer makes it
+    download the track again, and partial files left in the staging folder are cleaned up.
+    """
+    shared_files = tmp_path / "shared"
+    shared_files.mkdir()
+    (shared_files / "Darude - Feel the Beat.mp3").write_bytes(b"not really audio")
+    settings = make_settings(
+        tmp_path, extra_arguments=("--mock-files-dir", str(shared_files), "--mock-files-no-read-tags", "--no-progress")
+    )
+    track = Track(artists=("Darude",), title="Feel the Beat")
+    downloader = SockseekDownloader(settings)
+    partial_file = settings.output_directory / ".sockseek-staging" / "abc" / "song.mp3.incomplete"
+    partial_file.parent.mkdir(parents=True)
+    partial_file.write_bytes(b"half a song")
+    assert downloader.download([track], "leftovers").downloaded == [track]
+    assert not (settings.output_directory / ".sockseek-staging").exists()
+
+    with settings.index_path.open("a", encoding="utf-8", newline="") as file:
+        file.write(",Darude,,Feel the Beat,-1,0,0,0\n")
+    saved_file = settings.output_directory / "Darude - Feel the Beat.mp3"
+    saved_file.unlink()
+
+    report = downloader.download([track], "leftovers")
+    assert report.already_downloaded == [track]
+    assert report.downloaded == []
+    assert not saved_file.exists()

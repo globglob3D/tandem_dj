@@ -7,6 +7,7 @@ doubles as a download history: tracks it already fetched are skipped on later ru
 
 import csv
 import re
+import shutil
 import subprocess
 import threading
 from collections.abc import Callable, Sequence
@@ -19,7 +20,9 @@ from tandem_dj.models import Track
 from tandem_dj.text_cleaning import track_key
 
 INPUT_DIRECTORY_NAME = "inputs"
+STAGING_DIRECTORY_NAME = ".sockseek-staging"
 INPUT_COLUMNS = ("Artist", "Title", "Album", "Length")
+INDEX_IDENTITY_COLUMNS = ("artist", "album", "title", "length")
 INDEX_STATE_DOWNLOADED = "1"
 INDEX_STATE_FAILED = "2"
 INDEX_STATE_ALREADY_DOWNLOADED = "3"
@@ -51,6 +54,9 @@ class SockseekDownloader:
         Without ``on_output_line``, sockseek prints its own progress to the terminal. With it, sockseek output is
         handed over line by line instead, and includes JSON progress events.
 
+        Before the run, leftovers of interrupted runs are removed from the index; after it, the partial files
+        sockseek leaves in its staging folder inside the output folder are deleted.
+
         :param tracks: Tracks to download; duplicates are only requested once
         :param name: Name of the batch, used to name the generated sockseek input file
         :param keep_running: Condition checked every few seconds; sockseek is stopped as soon as it returns ``False``
@@ -62,9 +68,11 @@ class SockseekDownloader:
         requested_tracks = remove_duplicates(tracks)
         input_path = self.input_path_for(name)
         write_input_file(requested_tracks, input_path)
+        repair_index(self.settings.index_path)
         previously_downloaded = find_already_downloaded(requested_tracks, self.settings.index_path)
         command = self.build_command(input_path, requested_tracks, emit_progress_events=on_output_line is not None)
         exit_code, stopped_early = run_while(command, keep_running, on_output_line=on_output_line)
+        shutil.rmtree(self.settings.output_directory / STAGING_DIRECTORY_NAME, ignore_errors=True)
         report = build_report(requested_tracks, self.settings.index_path, exit_code, previously_downloaded)
         report.stopped_early = stopped_early
         return report
@@ -396,6 +404,48 @@ def read_index(index_path: Path) -> dict[tuple[str, str], IndexEntry]:
             if key not in entries or entry.conclusiveness >= entries[key].conclusiveness:
                 entries[key] = entry
     return entries
+
+
+def repair_index(index_path: Path) -> int:
+    """
+    Rewrite the sockseek index so that every track has a single row, the most conclusive one.
+
+    Sockseek trusts the last row it finds for a track. A run that was killed can leave an unfinished row after
+    the row of a success, which would make sockseek download that track again; this removes such leftovers.
+    Among equally conclusive rows, one whose file still exists is preferred, then the most recent.
+
+    :param index_path: Index file written by sockseek
+    :returns: Number of rows removed
+    """
+    if not index_path.is_file():
+        return 0
+    with index_path.open(encoding="utf-8-sig", newline="") as file:
+        reader = csv.DictReader(file)
+        columns = reader.fieldnames or []
+        rows = list(reader)
+    kept_rows: dict[tuple[str, ...], dict[str, str]] = {}
+    for row in rows:
+        key = tuple(row[column] for column in INDEX_IDENTITY_COLUMNS)
+        if key not in kept_rows or _index_row_rank(row) >= _index_row_rank(kept_rows[key]):
+            kept_rows[key] = row
+    removed_count = len(rows) - len(kept_rows)
+    if removed_count:
+        with index_path.open("w", encoding="utf-8", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=columns, lineterminator="\n")
+            writer.writeheader()
+            writer.writerows(kept_rows.values())
+    return removed_count
+
+
+def _index_row_rank(row: dict[str, str]) -> tuple[int, bool]:
+    """
+    Rank an index row by how much it should be trusted.
+
+    :param row: Row of the sockseek index
+    :returns: Conclusiveness of its state, then whether its file still exists
+    """
+    entry = IndexEntry(state=row["state"], file_path=row["filepath"])
+    return entry.conclusiveness, bool(entry.file_path) and Path(entry.file_path).is_file()
 
 
 def _file_name_from(name: str) -> str:

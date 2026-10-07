@@ -111,10 +111,14 @@ Errors meant for the user are dedicated exceptions (`SourceError`, `DownloadErro
 - **sockseek exits with code 1 when some tracks fail**; that is a normal partial result, not a crash.
 - **Index state `0`** marks a track sockseek was still working on when it was stopped; it is reported as
   "not finished", not as failed.
-- **The index can hold several rows for one track** (a stale state `0` row from a killed run next to a later
-  success, in no dependable order). `read_index()` keeps the most conclusive one: downloaded, then failed, then
-  unfinished. A row skipped by a later run may keep state `1`, so "already downloaded" is decided from a snapshot
-  taken before sockseek starts (`previously_downloaded`).
+- **The index can hold several rows for one track**, and sockseek trusts the last one. A killed run (Stop button,
+  VPN drop, crash) can leave a state `0` row after a success row, which makes sockseek download the track again.
+  `repair_index()` therefore runs before every sockseek run and keeps one row per track, the most conclusive
+  (downloaded, then failed, then unfinished); `read_index()` applies the same rule when reading. A row skipped by
+  a later run may keep state `1`, so "already downloaded" is decided from a snapshot taken before sockseek starts
+  (`previously_downloaded`).
+- **Staging leftovers**: sockseek downloads into `<output folder>/.sockseek-staging`; partial files stay there
+  after failed transfers or a kill, so that folder is deleted after every run.
 - **PIA (`piactl`)**: `get connectionstate` says `Connected` a few seconds before traffic is really routed, and
   `get pubip` is the *real* address even while connected (`vpnip` is the VPN one, `Unknown` for ~8 s). So
   `VpnGuard` confirms with an outside lookup (`ADDRESS_LOOKUP_URLS`) that the visible address differs from `pubip`
