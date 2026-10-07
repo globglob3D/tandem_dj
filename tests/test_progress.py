@@ -13,6 +13,7 @@ from tandem_dj.progress import (
     STATUS_SEARCHING,
     STATUS_WAITING,
     ProgressTracker,
+    describe_failure,
     format_seconds,
     format_size,
     remote_file_name,
@@ -162,7 +163,7 @@ def test_progress_is_matched_to_the_right_track_by_file_size():
 
 def test_failure_reason_is_made_readable():
     """
-    A failed track carries the reason sockseek gave, in plain words.
+    A failed track says in plain words whether nothing was found, or files were found that nobody sent.
     """
     tracker = make_tracker()
     tracker.handle_line(
@@ -174,10 +175,75 @@ def test_failure_reason_is_made_readable():
             lifecycleState="Terminal",
             terminalOutcome="Failed",
             failureReason="NoSearchResults",
+            rawResultCount=0,
+            lockedCount=0,
         )
     )
     entry = tracker.snapshot()[2]
-    assert (entry.status, entry.detail) == (STATUS_FAILED, "no search results")
+    assert (entry.status, entry.detail) == (
+        STATUS_FAILED,
+        "not found: nobody on Soulseek shares a file matching this search",
+    )
+
+
+def test_a_track_that_no_source_sent_names_the_sources_that_were_tried():
+    """
+    Every user a transfer was started from is remembered, once each and in order, and named when the track fails
+    because none of them sent the file.
+    """
+    tracker = make_tracker()
+    for second, username in ((12.0, "first peer"), (32.0, "second peer"), (52.0, "first peer")):
+        tracker.handle_line(
+            event(
+                "download_start",
+                second,
+                artist="Darude",
+                title="Feel the Beat",
+                username=username,
+                filename="music\\Darude - Feel the Beat.mp3",
+                size=10_000_000,
+            )
+        )
+    assert tracker.snapshot()[1].sources == ("first peer", "second peer")
+    tracker.handle_line(
+        event(
+            "track_state",
+            59.0,
+            artist="Darude",
+            title="Feel the Beat",
+            lifecycleState="Terminal",
+            terminalOutcome="Failed",
+            failureReason="AllDownloadsFailed",
+        )
+    )
+    entry = tracker.snapshot()[1]
+    assert (entry.status, entry.sources) == (STATUS_FAILED, ("first peer", "second peer"))
+    assert entry.detail == "found, but none of the 2 sources tried sent the file (first peer, second peer)"
+
+
+def test_failures_are_explained_in_plain_words():
+    """
+    Each reason sockseek gives has its own explanation; an unknown one is shown as readable words.
+    """
+    assert describe_failure("NoMatchingResults", (), 42, 3) == (
+        "not found: 42 files came up but none fits (wrong length or format, 3 are private)"
+    )
+    assert describe_failure("NoMatchingResults") == (
+        "not found: the files that came up do not fit (wrong length or format)"
+    )
+    assert describe_failure("AllDownloadsFailed") == "found, but no source sent the file"
+    assert describe_failure("AllDownloadsFailed", ("lonely peer",)) == (
+        "found, but its source did not send the file (lonely peer)"
+    )
+    many_sources = tuple(f"peer {number}" for number in range(1, 11))
+    assert describe_failure("OutOfDownloadRetries", many_sources) == (
+        "found, but none of the 10 sources tried sent the file and sockseek stopped trying "
+        "(peer 1, peer 2, peer 3, peer 4, peer 5, ...)"
+    )
+    assert describe_failure("InvalidSearchString") == (
+        "not searched: nothing is left of its name once special characters are removed"
+    )
+    assert describe_failure("SomethingNewHappened") == "something new happened"
 
 
 def test_summary_counts_and_estimates_time_left():

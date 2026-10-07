@@ -263,6 +263,13 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
 - **Only the first artist is written to the sockseek input**, because a Soulseek search needs every word to match a
   file path. `Track.artists` keeps them all.
 - **sockseek exits with code 1 when some tracks fail**; that is a normal partial result, not a crash.
+- **Why a track failed** comes from the `failureReason` of its `track_state` event, turned into a sentence by
+  `progress.describe_failure()`: `NoSearchResults` (nothing came back), `NoMatchingResults` (files came back, none
+  passed the length and format conditions; the event carries `rawResultCount` and `lockedCount`),
+  `AllDownloadsFailed` (candidates were found and each one tried failed, was refused, or was dropped after
+  `--max-stale-time` without progress, until none was left) and `OutOfDownloadRetries` (the same, stopped by
+  `--max-retries`, 10 by default). The user asked what "all downloads failed" meant, so never show these names raw.
+  `TrackProgress.sources` lists the users a transfer was started from; the failure sentence names them.
 - **Index state `0`** marks a track sockseek was still working on when it was stopped; it is reported as
   "not finished", not as failed.
 - **The index can hold several rows for one track**, and sockseek trusts the last one. A killed run (Stop button,

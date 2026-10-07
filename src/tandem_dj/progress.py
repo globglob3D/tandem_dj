@@ -23,6 +23,13 @@ FINISHED_STATUSES = (STATUS_DOWNLOADED, STATUS_ALREADY_DOWNLOADED, STATUS_FAILED
 
 SPEED_SMOOTHING = 0.5
 MINIMUM_FINISHED_FOR_ESTIMATE = 3
+MAXIMUM_SOURCES_NAMED = 5
+
+FAILURE_NO_SEARCH_RESULTS = "NoSearchResults"
+FAILURE_NO_MATCHING_RESULTS = "NoMatchingResults"
+FAILURE_ALL_DOWNLOADS_FAILED = "AllDownloadsFailed"
+FAILURE_OUT_OF_RETRIES = "OutOfDownloadRetries"
+FAILURE_INVALID_SEARCH = "InvalidSearchString"
 
 
 class ProgressTracker:
@@ -152,6 +159,9 @@ class ProgressTracker:
                 self._entry_by_job = {job: other for job, other in self._entry_by_job.items() if other is not entry}
                 entry.status = STATUS_DOWNLOADING
                 entry.detail = f"from {data.get('username', '?')}: {remote_file_name(str(data.get('filename', '')))}"
+                source = str(data.get("username") or "")
+                if source and source not in entry.sources:
+                    entry.sources += (source,)
                 entry.total_bytes = int(data.get("size") or 0)
                 entry.bytes_transferred, entry.speed_bytes_per_second, entry.progress_at = 0, 0.0, None
         elif event_type == "download_progress":
@@ -179,7 +189,12 @@ class ProgressTracker:
             entry.status, entry.detail = STATUS_ALREADY_DOWNLOADED, ""
         else:
             entry.status = STATUS_FAILED
-            entry.detail = _spaced_words(str(description.get("failureReason") or outcome or "unknown reason"))
+            entry.detail = describe_failure(
+                str(description.get("failureReason") or outcome or "unknown reason"),
+                entry.sources,
+                description.get("rawResultCount"),
+                description.get("lockedCount"),
+            )
 
     def _apply_download_progress(self, data: dict, event_time: datetime | None) -> None:
         """
@@ -233,12 +248,13 @@ class TrackProgress:
 
     :param track: The requested track
     :param status: One of the ``STATUS_`` constants of this module
-    :param detail: Extra information: the peer and file while downloading, the format once done, the failure reason
+    :param detail: Extra information: the peer and file while downloading, the format once done, or why it failed
     :param bytes_transferred: Bytes received so far
     :param total_bytes: Size of the file being received, ``0`` when unknown
     :param speed_bytes_per_second: Current transfer speed
     :param saved_path: Path the file was saved to, empty until the track is downloaded
     :param relaxed_query: Simpler spelling the track is or was last searched under, empty for the exact search
+    :param sources: Soulseek users a transfer of this track was started from, in the order they were tried
     :param progress_at: Time of the latest transfer progress event
     """
 
@@ -250,6 +266,7 @@ class TrackProgress:
     speed_bytes_per_second: float = 0.0
     saved_path: str = ""
     relaxed_query: str = ""
+    sources: tuple[str, ...] = ()
     progress_at: datetime | None = field(default=None, repr=False)
 
     @property
@@ -305,6 +322,43 @@ class ProgressSummary:
         :returns: Downloaded, already downloaded and failed tracks together
         """
         return self.downloaded_count + self.already_downloaded_count + self.failed_count
+
+
+def describe_failure(
+    reason: str, sources: tuple[str, ...] = (), result_count: int | None = None, locked_count: int | None = None
+) -> str:
+    """
+    Explain in plain words why sockseek gave up on a track.
+
+    Sockseek tells a search that returned nothing apart from one that returned only unsuitable files, and both
+    apart from a file that was found but that no source sent: each source is dropped once it refuses, disconnects
+    or stays silent for too long, and the track fails when none is left or too many were tried.
+
+    :param reason: Failure reason given by sockseek, such as ``AllDownloadsFailed``
+    :param sources: Soulseek users a transfer was started from
+    :param result_count: Number of files the search returned, ``None`` when unknown
+    :param locked_count: Number of those files their owner keeps private, ``None`` when unknown
+    :returns: The explanation shown in the details of the track
+    """
+    if reason == FAILURE_NO_SEARCH_RESULTS:
+        return "not found: nobody on Soulseek shares a file matching this search"
+    if reason == FAILURE_NO_MATCHING_RESULTS:
+        found = f"{result_count} files came up but none fits" if result_count else "the files that came up do not fit"
+        private_note = f", {locked_count} are private" if locked_count else ""
+        return f"not found: {found} (wrong length or format{private_note})"
+    if reason in (FAILURE_ALL_DOWNLOADS_FAILED, FAILURE_OUT_OF_RETRIES):
+        if not sources:
+            return "found, but no source sent the file"
+        named_sources = ", ".join(sources[:MAXIMUM_SOURCES_NAMED])
+        if len(sources) > MAXIMUM_SOURCES_NAMED:
+            named_sources += ", ..."
+        if len(sources) == 1:
+            return f"found, but its source did not send the file ({named_sources})"
+        gave_up = " and sockseek stopped trying" if reason == FAILURE_OUT_OF_RETRIES else ""
+        return f"found, but none of the {len(sources)} sources tried sent the file{gave_up} ({named_sources})"
+    if reason == FAILURE_INVALID_SEARCH:
+        return "not searched: nothing is left of its name once special characters are removed"
+    return _spaced_words(reason)
 
 
 def remote_file_name(remote_path: str) -> str:

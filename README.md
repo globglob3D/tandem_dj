@@ -151,6 +151,14 @@ Common situations:
 | A link gives an error but worked before | The website changed. Install a newer Tandem DJ; meanwhile, paste the tracks as `Artist - Title` lines. |
 | Tracks marked "Not finished" | The download was stopped or the VPN dropped: click **Download** again, finished tracks are skipped. |
 
+What the `Details` column says about a track marked `Failed`:
+
+| Details | Meaning |
+| --- | --- |
+| `not found: nobody on Soulseek shares a file matching this search` | The search returned nothing at all, even under the simpler spellings. |
+| `not found: 42 files came up but none fits (wrong length or format...)` | Files were found, but none is an audio file within 3 seconds of the expected length, or their owners keep them private. Often another version of the track. |
+| `found, but none of the 3 sources tried sent the file (...)` | The track exists and was found. sockseek asked each person sharing it in turn (up to 10), and each one refused, went offline or stayed silent, so nothing was received. The names in brackets are the people it asked. Trying again later often works: they may simply be offline or busy. |
+
 ## Where things are kept
 
 Everything the application writes lives in one folder per user:
