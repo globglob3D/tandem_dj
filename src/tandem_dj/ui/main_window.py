@@ -531,7 +531,7 @@ class MainWindow(tkinter.Tk):
         :param track: Track to look up
         :returns: User names, the most recent last
         """
-        live_entry = self._live_entries().get(track)
+        live_entry = self.tracker.entry_of(track) if self.tracker is not None else None
         live_sources = live_entry.sources if live_entry is not None else ()
         return tuple(dict.fromkeys((*self.tried_sources.get(track, ()), *live_sources)))
 
@@ -561,7 +561,7 @@ class MainWindow(tkinter.Tk):
         :param track: Track to look up
         :returns: Path of the file or album folder, empty when the track has none
         """
-        live_entry = self._live_entries().get(track)
+        live_entry = self.tracker.entry_of(track) if self.tracker is not None else None
         if live_entry is not None and live_entry.status == STATUS_DOWNLOADED and live_entry.saved_path:
             return live_entry.saved_path
         return self.saved_files.get(track, "")

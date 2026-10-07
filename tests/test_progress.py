@@ -301,6 +301,8 @@ def test_only_the_tracks_that_are_expected_are_followed():
         )
     )
     assert [(entry.track, entry.status) for entry in tracker.snapshot()] == [(DARUDE, STATUS_FAILED)]
+    assert tracker.entry_of(DARUDE).status == STATUS_FAILED
+    assert tracker.entry_of(AVERY) is None and tracker.entry_of(SKIPPED) is None
     assert (tracker.summary().total_count, tracker.summary().failed_count) == (1, 1)
 
     tracker.expect([DARUDE, AVERY, SKIPPED], "queued: download again")

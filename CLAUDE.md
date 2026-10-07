@@ -418,24 +418,36 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
 ## State of the project
 
 First released as 0.2.0; 0.3.0 added one folder per download, 0.4.0 reduced the VPN choices to two and simplified
-the settings, 0.5.0 made "already downloaded" depend on the file still being there. Left in a finished state on
-2026-10-07. What is known to work and what is not:
+the settings, 0.5.0 made "already downloaded" depend on the file still being there. 0.6.0 added the right-click
+menu on tracks (download one again, from the same or another source, as an album; leave a silent source), sortable
+columns, whole albums, failures explained in plain words, the setting for silent sources, and the reading of the
+whole playlist behind a YouTube video link. Left in a finished state on 2026-10-08. What is known to work and what
+is not:
 
-- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (192
+- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (252
   tests, none skipped, including the offline runs of the real sockseek and the hidden-window tests), the build, and
   the smoke test showing that the packaged application starts and that the sockseek and ffmpeg packed inside answer.
 - **Checked by hand on Windows**: the setup program installs, starts and uninstalls; a whole download driven through
   the real window against sockseek's mock mode (exact search, relaxed search, M4A conversion, password masked in
   the log), and three downloads in a row landing in their own folders (a text file, typed tracks, and one with
-  nothing new that leaves no folder).
-- **Never checked**: what the window looks like on a Mac (fonts, the `clam` theme, dialogs), the first-launch steps
-  on macOS described in `README.md`, and `piactl` at `/usr/local/bin/piactl`. The relaxed search has only run
-  against the mock mode, never the real Soulseek network. The address watch of the `none` VPN mode has only run
-  with simulated address lookups.
+  nothing new that leaves no folder). For 0.6.0, driven through the real window and its worker thread against the
+  mock mode: a track downloaded again and replaced, another source asked when there is none (the file is kept), a
+  request queued during a download and fulfilled by it, a source left during a slow download, and a track asked
+  as an album with its live file count. The two YouTube links the user reported read their 46 videos.
+- **Never checked**: what the window looks like on a Mac (fonts, the `clam` theme, dialogs, the right-click menu,
+  which is opened by a secondary click or Control-click there), the first-launch steps on macOS described in
+  `README.md`, and `piactl` at `/usr/local/bin/piactl`. The relaxed search, the album search and the options that
+  prefer or avoid a source (`--pref-allowed-users`, `--banned-users`) have only run against the mock mode, never
+  the real Soulseek network; in mock mode every file belongs to one user, so "another source" could only be shown
+  to leave that user out, not to pick a second one. The address watch of the `none` VPN mode has only run with
+  simulated address lookups. The YouTube answer that made a playlist link give one video was not caught in the
+  act: the cause was read in yt-dlp's code, and the fix avoids that path.
 
 Ideas that were mentioned and not started: preparing files for rekordbox; using the BPM and key Spotify returns;
 code signing to remove the first-launch warnings; telling the user when a newer version exists; exporting a track
-list to a file.
+list to a file. Thought of while building 0.6.0 and left out: leaving a source without restarting the other
+transfers and letting the user pick among every source of a track, both of which need sockseek's HTTP interface
+(`sockseek daemon`, marked experimental in 3.0.5); typing another search for a track that was not found.
 
 ## Conventions
 

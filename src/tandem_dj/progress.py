@@ -168,6 +168,17 @@ class ProgressTracker:
         with self._lock:
             return [TrackProgress(**vars(entry)) for entry in self._entries.values() if entry.is_followed]
 
+    def entry_of(self, track: Track) -> "TrackProgress | None":
+        """
+        Copy the current progress of one track.
+
+        :param track: Track to look up
+        :returns: The entry of the track, ``None`` when it is not followed
+        """
+        with self._lock:
+            entry = self._entries.get(track_key(track.primary_artist, track.title))
+            return TrackProgress(**vars(entry)) if entry is not None and entry.is_followed else None
+
     def summary(self) -> "ProgressSummary":
         """
         Add up the progress of the whole run.

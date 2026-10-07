@@ -82,9 +82,9 @@ def run_download(
     files that are not MP3.
 
     Tracks that are not found are searched again under simpler spellings, and the ones that look like a whole
-    album are then searched as an album, when the settings allow it. The requests
-    queued in ``control`` meanwhile are fulfilled before the protection ends, so that asking for one more track
-    during a download costs no second connection of the VPN.
+    album are then searched as an album, when the settings allow it. The requests queued in ``control`` meanwhile
+    are fulfilled before the protection ends, so that asking for one more track during a download costs no second
+    connection of the VPN.
 
     :param settings: User settings
     :param tracks: Tracks to download
