@@ -31,7 +31,7 @@ src/tandem_dj/
   ui/
     main_window.py   MainWindow (tkinter): input box, track table, summary bar, log pane
     settings_dialog.py  SettingsDialog: edits and saves config.toml
-    theme.py         dark green-on-black look, status and log colours
+    theme.py         dark muted retro look (beige on warm black, green accent), status and log colours
   config.py          Settings dataclass, load_settings() / save_settings() for config.toml
   models.py          Track, TrackCollection
   text_cleaning.py   upload title cleaning and "Artist - Title" splitting (shared by YouTube, SoundCloud, text)
@@ -97,7 +97,8 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 - The worker asks the user a question with `_confirm()`: it queues a `confirm` message holding an `_Answer` and
   waits on its event while the window thread shows the box (warning icon, No as the default button).
 - Looks live in `ui/theme.py` only (ttk `clam` theme recoloured; plain `tkinter.Text` widgets need
-  `style_text_box()`). The user wants it dark, without decorative animations.
+  `style_text_box()`). The user wants it dark, retro and easy on the eyes: muted colours from one palette (beige
+  text, a soft green accent, amber and red for warnings and errors), no neon and no decorative animations.
 - To check the window by eye, drive `MainWindow` against a temporary settings file with
   `extra_arguments = ("--mock-files-dir", <folder>, "--mock-files-slow")` and `vpn_mode = "none"`.
 - `tests/test_ui.py` shares one hidden window per module: starting Tk several times in a process fails at random.

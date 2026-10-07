@@ -1,5 +1,5 @@
 """
-The look of the window: a dark, green-on-black terminal style.
+The look of the window: a dark, muted retro terminal style, beige text on warm black with a green accent.
 """
 
 import ctypes
@@ -17,18 +17,20 @@ from tandem_dj.progress import (
 )
 from tandem_dj.workflow import LEVEL_ERROR, LEVEL_INFORMATION, LEVEL_SUCCESS, LEVEL_WARNING
 
-BACKGROUND = "#030803"
-SURFACE = "#071007"
-SURFACE_RAISED = "#0c1c0c"
-BORDER = "#145214"
-TEXT = "#35e06a"
-TEXT_DIM = "#1f7a3a"
-TEXT_BRIGHT = "#b6ffc8"
-SELECTION = "#11401c"
-AMBER = "#ffc94a"
-RED = "#ff5c5c"
+BACKGROUND = "#191713"
+SURFACE = "#201d18"
+SURFACE_RAISED = "#2b2721"
+BORDER = "#4a4337"
+TEXT = "#d5c8ab"
+TEXT_DIM = "#8d8470"
+TEXT_BRIGHT = "#f0e6ce"
+ACCENT = "#9cb87c"
+ACCENT_DIM = "#6f8859"
+SELECTION = "#38442f"
+AMBER = "#d9a54c"
+RED = "#d07060"
 
-FONT_FAMILY = "Consolas"
+FONT_FAMILY = {"win32": "Consolas", "darwin": "Menlo"}.get(sys.platform, "DejaVu Sans Mono")
 FONT = (FONT_FAMILY, 10)
 FONT_BOLD = (FONT_FAMILY, 10, "bold")
 FONT_SMALL = (FONT_FAMILY, 9)
@@ -40,13 +42,13 @@ STATUS_COLORS = {
     STATUS_WAITING: TEXT_DIM,
     STATUS_SEARCHING: AMBER,
     STATUS_DOWNLOADING: TEXT_BRIGHT,
-    STATUS_DOWNLOADED: TEXT,
+    STATUS_DOWNLOADED: ACCENT,
     STATUS_FOUND_RELAXED: AMBER,
-    STATUS_ALREADY_DOWNLOADED: TEXT_DIM,
+    STATUS_ALREADY_DOWNLOADED: ACCENT_DIM,
     STATUS_FAILED: RED,
     STATUS_NOT_FINISHED: RED,
 }
-LEVEL_COLORS = {LEVEL_INFORMATION: TEXT_DIM, LEVEL_SUCCESS: TEXT, LEVEL_WARNING: AMBER, LEVEL_ERROR: RED}
+LEVEL_COLORS = {LEVEL_INFORMATION: TEXT_DIM, LEVEL_SUCCESS: ACCENT, LEVEL_WARNING: AMBER, LEVEL_ERROR: RED}
 
 DARK_TITLE_BAR_ATTRIBUTE = 20
 
@@ -69,7 +71,7 @@ def apply_theme(window: tkinter.Misc) -> None:
         lightcolor=BORDER,
         darkcolor=BORDER,
         troughcolor=SURFACE,
-        focuscolor=TEXT_DIM,
+        focuscolor=ACCENT_DIM,
         insertcolor=TEXT_BRIGHT,
         selectbackground=SELECTION,
         selectforeground=TEXT_BRIGHT,
@@ -77,14 +79,14 @@ def apply_theme(window: tkinter.Misc) -> None:
     )
     style.configure("TLabel", background=BACKGROUND, foreground=TEXT)
     style.configure("Dim.TLabel", foreground=TEXT_DIM)
-    style.configure("Heading.TLabel", foreground=TEXT_BRIGHT, font=FONT_BOLD)
+    style.configure("Heading.TLabel", foreground=ACCENT, font=FONT_BOLD)
     style.configure("TFrame", background=BACKGROUND)
     style.configure("TButton", background=SURFACE_RAISED, foreground=TEXT, padding=(10, 5), relief="flat")
     style.map(
         "TButton",
         background=[("disabled", BACKGROUND), ("pressed", SELECTION), ("active", SELECTION)],
         foreground=[("disabled", TEXT_DIM), ("active", TEXT_BRIGHT)],
-        bordercolor=[("disabled", SURFACE_RAISED), ("active", TEXT)],
+        bordercolor=[("disabled", SURFACE_RAISED), ("active", ACCENT)],
     )
     style.configure("TEntry", fieldbackground=SURFACE, foreground=TEXT_BRIGHT, padding=4)
     for toggle_style in ("TCheckbutton", "TRadiobutton"):
@@ -93,7 +95,7 @@ def apply_theme(window: tkinter.Misc) -> None:
             background=BACKGROUND,
             foreground=TEXT,
             indicatorbackground=SURFACE,
-            indicatorforeground=TEXT_BRIGHT,
+            indicatorforeground=ACCENT,
             upperbordercolor=BORDER,
             lowerbordercolor=BORDER,
         )
@@ -111,13 +113,20 @@ def apply_theme(window: tkinter.Misc) -> None:
         "Treeview.Heading", background=SURFACE_RAISED, foreground=TEXT_BRIGHT, font=FONT_BOLD, relief="flat"
     )
     style.map("Treeview.Heading", background=[("active", SELECTION)])
-    style.configure("Horizontal.TProgressbar", background=TEXT, troughcolor=SURFACE, thickness=14)
+    style.configure(
+        "Horizontal.TProgressbar",
+        background=ACCENT,
+        lightcolor=ACCENT,
+        darkcolor=ACCENT,
+        troughcolor=SURFACE,
+        thickness=14,
+    )
     for orientation in ("Vertical", "Horizontal"):
         style.configure(
             f"{orientation}.TScrollbar",
             background=SURFACE_RAISED,
             troughcolor=BACKGROUND,
-            arrowcolor=TEXT,
+            arrowcolor=TEXT_DIM,
             relief="flat",
         )
         style.map(f"{orientation}.TScrollbar", background=[("active", SELECTION)])
@@ -142,7 +151,7 @@ def style_text_box(text_box: tkinter.Text) -> None:
         borderwidth=0,
         highlightthickness=1,
         highlightbackground=BORDER,
-        highlightcolor=TEXT,
+        highlightcolor=ACCENT_DIM,
         padx=6,
         pady=4,
     )

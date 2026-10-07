@@ -72,8 +72,8 @@ COLUMNS = (
     ("size", "Received", 130, "e"),
     ("speed", "Speed", 76, "e"),
     ("left", "Time left", 84, "e"),
-    ("detail", "Details", 180, "w"),
-    ("notes", "Notes", 80, "w"),
+    ("detail", "Details", 300, "w"),
+    ("notes", "Notes", 160, "w"),
 )
 
 
