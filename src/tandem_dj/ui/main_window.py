@@ -42,6 +42,7 @@ from tandem_dj.sources import SourceError, read_track_lines, read_tracks
 from tandem_dj.text_cleaning import track_key
 from tandem_dj.ui import theme
 from tandem_dj.ui.settings_dialog import SettingsDialog
+from tandem_dj.ui.table_sort import POSITION_COLUMN, SortOrder, sort_value, sorted_rows
 from tandem_dj.ui.theme import STATUS_FOUND_RELAXED, STATUS_NOT_FINISHED
 from tandem_dj.vpn import VPN_MODE_NONE, VpnError, VpnGuard
 from tandem_dj.workflow import (
@@ -102,6 +103,7 @@ class MainWindow(tkinter.Tk):
         self.stop_requested = threading.Event()
         self.messages: queue.Queue[tuple] = queue.Queue()
         self.close_when_idle = False
+        self.sort_order = SortOrder()
 
         self.title(WINDOW_TITLE)
         self.geometry(WINDOW_SIZE)
@@ -149,14 +151,15 @@ class MainWindow(tkinter.Tk):
 
     def _build_track_table(self) -> None:
         """
-        Create the table listing every track with its live status.
+        Create the table listing every track with its live status. A click on a heading sorts by that column.
         """
         frame = ttk.Frame(self, padding=(10, 4))
         frame.pack(fill="both", expand=True)
         self.table = ttk.Treeview(frame, columns=[name for name, *_ in COLUMNS], show="headings", selectmode="browse")
-        for name, heading, width, anchor in COLUMNS:
-            self.table.heading(name, text=heading, anchor=anchor)
+        for name, _, width, anchor in COLUMNS:
+            self.table.heading(name, anchor=anchor, command=lambda column=name: self._on_sort(column))
             self.table.column(name, width=width, anchor=anchor, stretch=name in ("title", "detail", "notes"))
+        self._show_sort_order()
         for status, color in theme.STATUS_COLORS.items():
             self.table.tag_configure(status, foreground=color)
         vertical_scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.table.yview)
@@ -285,6 +288,16 @@ class MainWindow(tkinter.Tk):
             self._log("Settings saved.", LEVEL_SUCCESS)
             self._log_setup()
             self._show_vpn_state()
+
+    def _on_sort(self, column: str) -> None:
+        """
+        Sort the table by the column whose heading was clicked, the other way round on a second click.
+
+        :param column: Name of the clicked column
+        """
+        self.sort_order = self.sort_order.after_click_on(column)
+        self._show_sort_order()
+        self._sort_rows()
 
     def _on_open_logs(self) -> None:
         """
@@ -579,10 +592,32 @@ class MainWindow(tkinter.Tk):
             text=f"{collection.display_name}  [{collection.origin}]  -  {len(tracks)} tracks to send to sockseek, "
             f"{duplicate_count} duplicates left out, {len(already_downloaded)} already downloaded"
         )
+        self._sort_rows()
         self.overall_bar.configure(maximum=max(len(tracks), 1), value=0)
         self.summary_label.configure(
             text="Artist and Title are exactly what sockseek receives. Check them, then Download."
         )
+
+    def _show_sort_order(self) -> None:
+        """
+        Mark the heading of the sorted column with an arrow giving the direction.
+        """
+        for name, heading, *_ in COLUMNS:
+            arrow = self.sort_order.arrow if name == self.sort_order.column else ""
+            self.table.heading(name, text=heading + arrow)
+
+    def _sort_rows(self) -> None:
+        """
+        Put the rows in the order chosen by clicking a heading, moving them only when that order changed.
+        """
+        rows = self.table.get_children()
+        positions = {row: int(self.table.set(row, POSITION_COLUMN)) for row in rows}
+        column = self.sort_order.column
+        values = {row: sort_value(column, self.table.set(row, column)) for row in rows}
+        ordered_rows = sorted_rows(values, positions, self.sort_order.descending)
+        if ordered_rows != list(rows):
+            for position, row in enumerate(ordered_rows):
+                self.table.move(row, "", position)
 
     def _show_progress(self) -> None:
         """
@@ -592,6 +627,7 @@ class MainWindow(tkinter.Tk):
             found_relaxed = entry.status == STATUS_DOWNLOADED and entry.relaxed_query
             status = STATUS_FOUND_RELAXED if found_relaxed else entry.status
             self._show_row(entry.track, status, _describe_progress(entry), entry)
+        self._sort_rows()
         summary = self.tracker.summary()
         self.overall_bar.configure(maximum=max(summary.total_count, 1), value=summary.finished_count)
         parts = [
@@ -664,6 +700,7 @@ class MainWindow(tkinter.Tk):
             self._show_row(track, STATUS_FAILED, "", None, entry.detail if entry else "not found or failed")
         for track in report.not_attempted:
             self._show_row(track, STATUS_NOT_FINISHED, "", None, "run Download again to retry")
+        self._sort_rows()
         finished_count = len(report.downloaded) + len(report.already_downloaded) + len(report.failed)
         self.overall_bar.configure(value=finished_count)
         relaxed_note = (

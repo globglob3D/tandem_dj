@@ -36,6 +36,7 @@ src/tandem_dj/
   ui/
     main_window.py   MainWindow (tkinter): input box, track table, summary bar, log pane
     settings_dialog.py  SettingsDialog: edits and saves config.toml
+    table_sort.py    SortOrder, sorted_rows(), sort_value(): the order of the rows after a click on a heading
     theme.py         dark muted retro look (beige on warm black, green accent), status and log colours
   config.py          Settings dataclass, load_settings() / save_settings() for config.toml
   models.py          Track, TrackCollection
@@ -108,6 +109,11 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 - With a listener, sockseek runs with `--progress-json` and its output is piped: JSON lines update the
   `ProgressTracker`, other lines go to the log. `download_progress` events carry a `jobId` but no artist or title,
   so the tracker attaches each job to the downloading track whose announced file size matches.
+- A click on a heading sorts the table by that column, a second click reverses it, and an arrow in the heading
+  shows the direction (`ui/table_sort.py`, no Tk in it). The order is applied again after every redraw, so rows
+  move as their status changes; `#` gives the order of the track list back. `sort_value()` reads quantities
+  (length, size, speed, time left, percentage) from the text of the cells, so they sort as numbers. Empty cells
+  come last in both directions.
 - `_log()` writes to the log file as well as the log pane. `write_log()` alone records details that would clutter
   the pane, such as the full list of tracks sent.
 - Closing the window during a download stops sockseek first and waits for the worker, so the VPN guard always

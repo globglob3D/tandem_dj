@@ -21,6 +21,7 @@ from tandem_dj.sockseek import DownloadReport
 from tandem_dj.ui import main_window
 from tandem_dj.ui.main_window import MainWindow
 from tandem_dj.ui.settings_dialog import SettingsDialog
+from tandem_dj.ui.table_sort import SortOrder
 from tandem_dj.vpn import VPN_MODE_NONE, VPN_MODE_PIA
 
 SKONE = Track(artists=("Sköne", "Otah"), title="Afterlife", duration_seconds=240)
@@ -168,6 +169,39 @@ def test_live_progress_and_final_report_reach_the_table(window, tmp_path):
     window._show_report(later_report, tmp_path)
     assert cells(window, 1)["status"] == STATUS_ALREADY_DOWNLOADED
     assert cells(window, 1)["detail"] == "already have Darude - Feel The Beat.mp3, in Old list"
+
+
+def test_clicking_a_heading_sorts_the_table_and_marks_the_heading(window):
+    """
+    A click on a heading sorts the rows by that column and shows an arrow in it; a second click reverses the
+    order, and the order is kept when the rows change. The "#" heading gives the order of the track list back.
+    """
+    collection = TrackCollection(name="Son 2 Teuf", origin="spotify", tracks=[SKONE, DARUDE])
+    window._show_tracks(collection, [SKONE, DARUDE], duplicate_count=0, already_downloaded={})
+    assert window.table.heading("number", "text") == "# ▲"
+    try:
+        window._on_sort("artist")
+        assert [cells(window, row)["artist"] for row in range(2)] == ["Darude", "Sköne"]
+        assert window.table.heading("artist", "text") == "Artist (sent) ▲"
+        assert window.table.heading("number", "text") == "#"
+
+        window._on_sort("artist")
+        assert [cells(window, row)["artist"] for row in range(2)] == ["Sköne", "Darude"]
+        assert window.table.heading("artist", "text") == "Artist (sent) ▼"
+
+        window._on_sort("length")
+        window._on_sort("length")
+        assert [cells(window, row)["length"] for row in range(2)] == ["4:19", "4:00"]
+        window._show_tracks(collection, [SKONE, DARUDE], duplicate_count=0, already_downloaded={})
+        assert [cells(window, row)["length"] for row in range(2)] == ["4:19", "4:00"]
+
+        window._on_sort("status")
+        window._show_report(DownloadReport(downloaded=[SKONE], failed=[DARUDE]), window.settings.output_directory)
+        assert [cells(window, row)["status"] for row in range(2)] == ["Downloaded", "Failed"]
+    finally:
+        window._on_sort("number")
+    assert [cells(window, row)["number"] for row in range(2)] == ["1", "2"]
+    assert window.sort_order == SortOrder()
 
 
 def test_download_is_given_a_new_folder_named_after_the_playlist(window, monkeypatch, tmp_path):

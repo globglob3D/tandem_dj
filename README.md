@@ -52,6 +52,8 @@ To update, install the new version over the old one. Settings and download histo
    from, and finally the name it was saved as. The bar under the table shows the overall count, total speed and a
    rough estimate of the time left for the whole list. The log names the folder the download is saved in.
 4. **Stop** ends the download early; the VPN is disconnected as usual and a later Download resumes.
+   Click a column heading (Artist, Title, Status...) to sort the table by it, and click again for the reverse
+   order; an arrow in the heading shows the direction, and `#` gives the order of the playlist back.
 5. **Settings...** edits everything: Soulseek account, download folder, preferred quality, VPN, conversion.
 
 What a download does, in order:
