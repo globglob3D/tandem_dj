@@ -237,9 +237,11 @@ def test_vpn_line_says_how_downloads_are_protected(window):
 
 def test_settings_dialog_saves_the_edited_settings(window):
     """
-    Values edited in the settings dialog are written to the settings file.
+    Values edited in the settings dialog are written to the settings file, and the file naming pattern, which the
+    dialog does not show, is kept.
     """
-    dialog = SettingsDialog(window, window.settings, window.config_path)
+    settings = dataclasses.replace(window.settings, name_format="{sartist} - {stitle}")
+    dialog = SettingsDialog(window, settings, window.config_path)
     dialog.username.set("another-user")
     dialog.preferred_formats.set("flac, mp3")
     dialog.vpn_mode.set(VPN_MODE_PIA)
@@ -249,3 +251,4 @@ def test_settings_dialog_saves_the_edited_settings(window):
     assert saved_settings.soulseek_username == "another-user"
     assert saved_settings.preferred_formats == ("flac", "mp3")
     assert saved_settings.vpn_mode == VPN_MODE_PIA
+    assert saved_settings.name_format == "{sartist} - {stitle}"

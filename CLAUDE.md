@@ -240,7 +240,10 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
 - **sockseek is always run with `--no-config`** and every option passed explicitly from the settings. A global
   `%APPDATA%\sockseek\sockseek.conf` exists on the author's machine and must not influence runs.
 - **Flat output** comes from `--name-format`: with it, sockseek does not create a subfolder of its own inside the
-  folder of the batch.
+  folder of the batch. The default `{artist( - )title|slsk-filename}` reads: `Artist - Title` from the tags of the
+  file, otherwise (`|`) the name the file had on Soulseek. Measured in mock mode: a plain `{artist} - {title}`
+  names every untagged file `-.mp3`, each replacing the last. The pattern is set in `config.toml` only: the user
+  found it confusing in the settings window.
 - **The sockseek index is the download history.** One shared `--index-path` is used for every run; sockseek keeps
   the rows of other inputs and skips rows already downloaded even when the file has since been moved. State codes
   seen in the `state` column: `1` downloaded, `2` failed, `3` skipped as already downloaded.

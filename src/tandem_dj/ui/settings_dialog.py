@@ -45,7 +45,6 @@ class SettingsDialog(tkinter.Toplevel):
         self.output_directory = tkinter.StringVar(self, str(settings.output_directory))
         self.preferred_formats = tkinter.StringVar(self, ", ".join(settings.preferred_formats))
         self.preferred_minimum_bitrate = tkinter.StringVar(self, str(settings.preferred_minimum_bitrate))
-        self.name_format = tkinter.StringVar(self, settings.name_format)
         self.relaxed_search = tkinter.BooleanVar(self, settings.relaxed_search)
         self.extra_arguments = tkinter.StringVar(self, " ".join(settings.extra_arguments))
         self.vpn_mode = tkinter.StringVar(self, settings.vpn_mode)
@@ -69,7 +68,6 @@ class SettingsDialog(tkinter.Toplevel):
             "Search tracks that are not found again under simpler spellings (no accents, no punctuation, title alone)",
             self.relaxed_search,
         )
-        self._add_entry(form, "File naming", self.name_format, hint="sockseek --name-format")
         self._add_entry(form, "Extra sockseek flags", self.extra_arguments, hint="space separated, optional")
         self._add_heading(form, "VPN")
         for mode, label in VPN_MODE_LABELS.items():
@@ -209,7 +207,6 @@ class SettingsDialog(tkinter.Toplevel):
             output_directory=Path(self.output_directory.get().strip()),
             preferred_formats=tuple(name.strip() for name in self.preferred_formats.get().split(",") if name.strip()),
             preferred_minimum_bitrate=preferred_minimum_bitrate,
-            name_format=self.name_format.get().strip() or self.settings.name_format,
             relaxed_search=self.relaxed_search.get(),
             extra_arguments=tuple(self.extra_arguments.get().split()),
             vpn_mode=self.vpn_mode.get(),

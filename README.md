@@ -83,7 +83,8 @@ Every download gets a new folder inside the download folder chosen in the settin
 - The date and time are those of the click on **Download**, so downloading the same playlist twice gives two
   folders.
 - Characters a folder name cannot hold (`/ \ : * ? " < > |`) become spaces, and a very long playlist name is cut.
-- Inside the folder, files are named `Artist - Title.mp3` from their tags, without subfolders.
+- Inside the folder, files are named `Artist - Title.mp3` from their tags, without subfolders. A file without
+  tags keeps the name it had on Soulseek.
 - A track downloaded earlier is not fetched again (see below), so it stays in the folder of the download that
   fetched it. The new folder holds only what is new, and no folder is created when nothing new was saved.
 
@@ -166,6 +167,8 @@ Settings worth knowing, all in the **Settings...** dialog:
 - **Extra sockseek flags** are passed to every run: any flag from `sockseek --help`, for example `--fast-search`
   or `--desperate`.
 - **VPN**: see [VPN](#vpn) below.
+- File naming is not in the dialog. It is `[download] name_format` in `config.toml`, in the syntax described by
+  `sockseek --help name-format`.
 - The sockseek program (`[sockseek] executable` in `config.toml`) is empty by default, which means the one
   shipped with the application. ffmpeg is always the shipped one.
 

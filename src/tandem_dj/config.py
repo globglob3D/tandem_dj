@@ -28,7 +28,7 @@ class Settings:
     :param soulseek_username: Soulseek account name
     :param soulseek_password: Soulseek account password
     :param output_directory: Download folder, inside which every batch of downloads gets a folder of its own
-    :param name_format: File naming pattern, in sockseek's ``--name-format`` syntax
+    :param name_format: File naming pattern, in sockseek's ``--name-format`` syntax; only the settings file sets it
     :param preferred_formats: File formats to pick first when several are available
     :param preferred_minimum_bitrate: Bitrate, in kbps, below which a file is only a fallback
     :param relaxed_search: Whether tracks that are not found are searched again under simpler spellings
@@ -227,8 +227,9 @@ password = {password}
 # read from, and the date and time.
 output_directory = {output_directory}
 
-# File naming, in sockseek's --name-format syntax (described by "sockseek --help name-format").
-# The default renames files to "Artist - Title" from their tags and keeps the original name for untagged files.
+# How downloaded files are named, in sockseek's --name-format syntax (described by "sockseek --help name-format").
+# The default names a file "Artist - Title" from its tags. The part after "|" is what to use otherwise: a file
+# without those tags keeps the name it had on Soulseek ("slsk-filename").
 name_format = {name_format}
 
 # Soft preferences: files matching them are picked first, anything else is still accepted as a fallback.
