@@ -2,15 +2,19 @@
 The main window: paste links, check the parsed tracks, download them and follow every transfer.
 """
 
+import logging
 import queue
 import threading
 import tkinter
-import traceback
 from pathlib import Path
 from tkinter import messagebox, ttk
+from types import TracebackType
 
 from tandem_dj.config import ConfigurationError, Settings, default_settings, load_settings
+from tandem_dj.diagnostics import describe_setup
+from tandem_dj.logs import current_log_path, hide_secret, write_error_log, write_log
 from tandem_dj.models import Track, TrackCollection
+from tandem_dj.paths import APPLICATION_NAME, log_directory, open_folder
 from tandem_dj.progress import (
     STATUS_ALREADY_DOWNLOADED,
     STATUS_DOWNLOADED,
@@ -38,12 +42,18 @@ from tandem_dj.ui.theme import STATUS_NOT_FINISHED
 from tandem_dj.vpn import VpnError, VpnGuard
 from tandem_dj.workflow import LEVEL_ERROR, LEVEL_INFORMATION, LEVEL_SUCCESS, LEVEL_WARNING, run_download
 
-WINDOW_TITLE = "tandem_dj"
+WINDOW_TITLE = APPLICATION_NAME
 WINDOW_SIZE = "1400x800"
 PROGRESS_BAR_CELLS = 10
 REFRESH_INTERVAL_MILLISECONDS = 300
 TYPED_COLLECTION_NAME = "typed_tracks"
 VPN_MESSAGE_PREFIX = "VPN: "
+LOG_FILE_LEVELS = {
+    LEVEL_INFORMATION: logging.INFO,
+    LEVEL_SUCCESS: logging.INFO,
+    LEVEL_WARNING: logging.WARNING,
+    LEVEL_ERROR: logging.ERROR,
+}
 
 COLUMNS = (
     ("number", "#", 36, "e"),
@@ -62,12 +72,12 @@ COLUMNS = (
 
 class MainWindow(tkinter.Tk):
     """
-    Window of the toolbox, in the style of a file sharing client.
+    Window of the application, in the style of a file sharing client.
 
     Reading websites and downloading run in a background thread that reports back through a queue, so the window
-    stays responsive. Everything shown in the log is also printed to the terminal.
+    stays responsive. Everything shown in the log pane is also written to the log file.
 
-    :param config_path: Settings file to use, ``None`` for ``config.toml`` at the repository root
+    :param config_path: Settings file to use, ``None`` for ``config.toml`` in the user data folder
     """
 
     def __init__(self, config_path: Path | None = None) -> None:
@@ -161,16 +171,21 @@ class MainWindow(tkinter.Tk):
 
     def _build_log(self) -> None:
         """
-        Create the pane repeating what is printed to the terminal.
+        Create the pane showing what happens, with a button leading to the log files.
         """
         frame = ttk.Frame(self, padding=(10, 4, 10, 10))
         frame.pack(fill="x")
+        ttk.Label(frame, text="Log (also saved to a file for every launch)", style="Dim.TLabel").grid(
+            row=0, column=0, sticky="w", pady=(0, 4)
+        )
+        self.logs_button = ttk.Button(frame, text="Open logs folder", command=self._on_open_logs)
+        self.logs_button.grid(row=0, column=0, columnspan=2, sticky="e", pady=(0, 4))
         self.log_box = tkinter.Text(frame, height=9, wrap="none", state="disabled", font=theme.FONT_SMALL)
         theme.style_text_box(self.log_box)
         scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.log_box.yview)
         self.log_box.configure(yscrollcommand=scrollbar.set)
-        self.log_box.grid(row=0, column=0, sticky="nsew")
-        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.log_box.grid(row=1, column=0, sticky="nsew")
+        scrollbar.grid(row=1, column=1, sticky="ns")
         frame.columnconfigure(0, weight=1)
         for level, color in theme.LEVEL_COLORS.items():
             self.log_box.tag_configure(level, foreground=color)
@@ -186,7 +201,24 @@ class MainWindow(tkinter.Tk):
             self.after(200, self._on_settings)
             return
         self._log(f"Settings loaded. Downloads go to {self.settings.output_directory}", LEVEL_INFORMATION)
+        self._log_setup()
         self._show_vpn_state()
+
+    def _log_setup(self) -> None:
+        """
+        Write a description of the setup to the log file, without holding up the window.
+        """
+        hide_secret(self.settings.soulseek_password)
+        settings, config_path = self.settings, self.config_path
+
+        def describe() -> None:
+            """
+            Gather the description, which runs sockseek, and write it. Runs in a background thread.
+            """
+            for line in describe_setup(settings, config_path):
+                write_log(f"setup | {line}")
+
+        threading.Thread(target=describe, name="tandem-setup", daemon=True).start()
 
     def _show_vpn_state(self) -> None:
         """
@@ -234,7 +266,18 @@ class MainWindow(tkinter.Tk):
         if dialog.saved_settings is not None:
             self.settings = dialog.saved_settings
             self._log("Settings saved.", LEVEL_SUCCESS)
+            self._log_setup()
             self._show_vpn_state()
+
+    def _on_open_logs(self) -> None:
+        """
+        Show the folder holding the log files, where the most recent file is the one of this launch.
+        """
+        log_path = current_log_path()
+        try:
+            open_folder(log_path.parent if log_path else log_directory())
+        except OSError as error:
+            messagebox.showerror(WINDOW_TITLE, f"The logs folder could not be opened: {error}", parent=self)
 
     def _on_close(self) -> None:
         """
@@ -288,9 +331,10 @@ class MainWindow(tkinter.Tk):
         except (SourceError, DownloadError, VpnError) as error:
             self._log(f"Error: {error}", LEVEL_ERROR)
             self.messages.put(("error", str(error)))
-        except Exception:
-            self._log(traceback.format_exc(), LEVEL_ERROR)
-            self.messages.put(("error", "Unexpected error, see the log for details."))
+        except Exception as error:
+            write_error_log("Unexpected error while working")
+            self._log(f"Unexpected error: {type(error).__name__}: {error}", LEVEL_ERROR)
+            self.messages.put(("error", "Unexpected error. The details are in the log file (Open logs folder)."))
         finally:
             self.messages.put(("idle",))
 
@@ -318,12 +362,10 @@ class MainWindow(tkinter.Tk):
             f"to sockseek, {duplicate_count} duplicates left out, {len(already_downloaded)} already downloaded.",
             LEVEL_SUCCESS,
         )
-        self._log("Tracks as sent to sockseek (artist | title):", LEVEL_INFORMATION, window=False)
+        write_log("Tracks as sent to sockseek (artist | title | length in seconds):")
         for number, track in enumerate(unique_tracks, start=1):
             sent_values = input_row(track)
-            self._log(
-                f"  {number:>3}. {sent_values['Artist']} | {sent_values['Title']}", LEVEL_INFORMATION, window=False
-            )
+            write_log(f"  {number:>3}. {sent_values['Artist']} | {sent_values['Title']} | {sent_values['Length']}")
         self.requested_tracks = unique_tracks
         self.collection_name = collection.name
         self.read_input = pasted_text
@@ -365,17 +407,32 @@ class MainWindow(tkinter.Tk):
         )
         self.messages.put(("finished", report))
 
-    def _log(self, message: str, level: str = LEVEL_INFORMATION, window: bool = True) -> None:
+    def _log(self, message: str, level: str = LEVEL_INFORMATION) -> None:
         """
-        Print a message to the terminal and queue it for the log pane. Safe to call from any thread.
+        Write a message to the log file and queue it for the log pane. Safe to call from any thread.
 
         :param message: Message to show
         :param level: One of the ``LEVEL_`` constants of :mod:`tandem_dj.workflow`
-        :param window: Whether the message also goes to the log pane, or to the terminal only
         """
-        print(message, flush=True)
-        if window:
-            self.messages.put(("log", message, level))
+        write_log(message, LOG_FILE_LEVELS.get(level, logging.INFO))
+        self.messages.put(("log", message, level))
+
+    def report_callback_exception(
+        self, exception_type: type[BaseException], exception: BaseException, traceback: TracebackType | None
+    ) -> None:
+        """
+        Record an error raised by a button or a timer of the window, and tell the user where the details are.
+
+        :param exception_type: Type of the exception
+        :param exception: The exception
+        :param traceback: Where it happened
+        """
+        logging.getLogger("tandem_dj").error(
+            "Unexpected error in the window", exc_info=(exception_type, exception, traceback)
+        )
+        self._append_log(
+            f"Unexpected error: {exception_type.__name__}: {exception} (details in the log file)", LEVEL_ERROR
+        )
 
     def _refresh(self) -> None:
         """

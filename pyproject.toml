@@ -1,7 +1,7 @@
 [project]
 name = "tandem-dj"
-version = "0.1.0"
-description = "Personal toolbox for managing DJ music: read playlists and batch-download their tracks from Soulseek"
+version = "0.2.0"
+description = "A window for managing DJ music: read playlists and batch-download their tracks from Soulseek"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.gui-scripts]
-tandem = "tandem_dj.ui:run"
+tandem = "tandem_dj.app:main"
 
 [dependency-groups]
 dev = [

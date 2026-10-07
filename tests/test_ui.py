@@ -4,10 +4,12 @@ Tests of the window, created hidden and driven without its event loop.
 
 import dataclasses
 import json
+import logging
 import tkinter
 
 import pytest
 
+from tandem_dj import logs
 from tandem_dj.config import default_settings, load_settings, save_settings
 from tandem_dj.models import Track, TrackCollection
 from tandem_dj.progress import STATUS_ALREADY_DOWNLOADED, STATUS_DOWNLOADING, STATUS_WAITING, ProgressTracker
@@ -110,6 +112,24 @@ def test_live_progress_and_final_report_reach_the_table(window):
     assert cells(window, 1)["detail"] == "saved as Darude - Feel The Beat.mp3"
     assert cells(window, 0)["status"] == "Not finished"
     assert "1 downloaded" in window.summary_label.cget("text")
+
+
+def test_window_messages_go_to_the_log_pane_and_the_log_file(window, tmp_path):
+    """
+    A message logged by the window shows in its log pane and is written to the log file of the launch.
+    """
+    log_file = logs.start_logging(tmp_path / "logs")
+    try:
+        window._log("Something worth keeping", "warning")
+        window._refresh()
+    finally:
+        logger = logging.getLogger(logs.LOGGER_NAME)
+        for handler in list(logger.handlers):
+            handler.close()
+            logger.removeHandler(handler)
+    assert "Something worth keeping" in window.log_box.get("1.0", "end")
+    assert "WARNING  Something worth keeping" in log_file.read_text(encoding="utf-8")
+    assert window.logs_button.cget("text") == "Open logs folder"
 
 
 def test_settings_dialog_saves_the_edited_settings(window):
