@@ -120,7 +120,8 @@ def test_remove_duplicates_compares_loosely():
 
 def test_build_report_sorts_tracks_by_index_state(tmp_path):
     """
-    Each requested track is classified from the latest state sockseek recorded for it.
+    Each requested track is classified from the most conclusive state sockseek recorded for it: a success wins
+    over a stale unfinished row, and a track downloaded before the run counts as already downloaded.
     """
     index_path = tmp_path / "index.csv"
     index_path.write_text(
@@ -128,6 +129,9 @@ def test_build_report_sorts_tracks_by_index_state(tmp_path):
         "D:/x/a.mp3,Daniel Avery,,Naive Response,-1,0,1,0\n"
         ",Nobody Real,,Missing Song,200,0,2,9\n"
         ",Cut Short,,Interrupted Song,180,0,0,0\n"
+        "D:/x/c.mp3,Resumed,,Finished Later,200,0,1,0\n"
+        ",Resumed,,Finished Later,200,0,0,0\n"
+        "D:/x/d.mp3,Old Favourite,,Kept,210,0,1,0\n"
         "D:/x/b.mp3,Todd Terje,,Ragysh,500,0,1,0\n"
         "D:/x/b.mp3,Todd Terje,,Ragysh,500,0,3,0\n",
         encoding="utf-8",
@@ -137,15 +141,22 @@ def test_build_report_sorts_tracks_by_index_state(tmp_path):
     already_downloaded = Track(artists=("Todd Terje",), title="Ragysh")
     not_attempted = Track(artists=("Darude",), title="Feel the Beat")
     interrupted = Track(artists=("Cut Short",), title="Interrupted Song")
-    requested = [downloaded, failed, already_downloaded, not_attempted, interrupted]
-    report = build_report(requested, index_path, exit_code=1)
-    assert report.downloaded == [downloaded]
+    resumed = Track(artists=("Resumed",), title="Finished Later")
+    kept = Track(artists=("Old Favourite",), title="Kept")
+    requested = [downloaded, failed, already_downloaded, not_attempted, interrupted, resumed, kept]
+    report = build_report(requested, index_path, exit_code=1, previously_downloaded=[kept])
+    assert report.downloaded == [downloaded, resumed]
     assert report.failed == [failed]
-    assert report.already_downloaded == [already_downloaded]
+    assert report.already_downloaded == [already_downloaded, kept]
     assert report.not_attempted == [not_attempted, interrupted]
-    assert report.saved_files == {downloaded: "D:/x/a.mp3", already_downloaded: "D:/x/b.mp3"}
+    assert report.saved_files == {
+        downloaded: "D:/x/a.mp3",
+        already_downloaded: "D:/x/b.mp3",
+        resumed: "D:/x/c.mp3",
+        kept: "D:/x/d.mp3",
+    }
     assert report.exit_code == 1
-    assert find_already_downloaded(requested, index_path) == [downloaded, already_downloaded]
+    assert find_already_downloaded(requested, index_path) == [downloaded, already_downloaded, resumed, kept]
 
 
 def test_run_while_stops_the_program_when_the_condition_fails():
