@@ -16,7 +16,7 @@ Requirements:
   upgrade it)
 - [Private Internet Access](https://www.privateinternetaccess.com/), logged in, for the VPN (optional if
   `required = false` in the `[vpn]` settings)
-- [ffmpeg](https://ffmpeg.org/) on the PATH, to convert lossless downloads to MP3
+- [ffmpeg](https://ffmpeg.org/) on the PATH, to convert downloads in other formats to MP3
 
 ```powershell
 cd C:\Users\arthu\code\tandem_dj
@@ -94,8 +94,8 @@ What happens, in order:
    that the internet no longer sees your real address. If the VPN drops, sockseek is stopped within seconds.
 3. **sockseek downloads**, printing its own progress.
 4. **The VPN is disconnected again**, unless it was already on before the run.
-5. **Lossless files are converted to MP3**: when a track only exists as FLAC, WAV or AIFF, it is converted to
-   320 kbps MP3 with its tags and cover art, and the lossless original is deleted.
+5. **Other formats are converted to MP3**: when a track only exists as FLAC, WAV, AIFF, M4A, OGG, Opus or
+   another format, it is converted to 320 kbps MP3 with its tags and cover art, and the original is deleted.
 6. **The result is listed**: each downloaded track with the file it was saved as, then what was not found.
 
 Good to know:
@@ -106,9 +106,6 @@ Good to know:
 - sockseek shares no files, so nothing is ever uploaded from this computer.
 - Stopping a download midway is safe: finished tracks stay recorded, the next run picks up the rest, and the
   partial files sockseek leaves in `.sockseek-staging` inside the output folder are deleted after every run.
-- When no MP3 or lossless file exists for a track, sockseek may fall back to another format such as `.m4a` or
-  `.opus`. Those are kept as downloaded. To refuse them, add `"--format", "mp3,flac,wav,aiff"` to
-  `extra_arguments` in the `[sockseek]` settings.
 - **Re-running the same command only downloads what is new.** Every outcome is recorded in
   `data\sockseek_index.csv`, so a track is fetched once even if you later move the file off the USB key. Tracks that
   failed are retried on the next run.
@@ -150,7 +147,7 @@ documents each key:
 - `[vpn]`: `required = true` makes every download go through Private Internet Access (`piactl` is its command line
   tool, installed with it). You must be logged in to PIA. Keep PIA's own kill switch on "Auto" (its default) as a
   second line of defence.
-- `[conversion]`: whether lossless downloads become MP3, at which bitrate, and where ffmpeg is
+- `[conversion]`: whether downloads in other formats become MP3, at which bitrate, and where ffmpeg is
 
 Use another settings file with `tandem --config other.toml download ...`.
 

@@ -1,5 +1,5 @@
 """
-Tests of the conversion of lossless files to MP3, run with the real ffmpeg when it is installed.
+Tests of the conversion of audio files to MP3, run with the real ffmpeg when it is installed.
 """
 
 import shutil
@@ -8,10 +8,35 @@ from pathlib import Path
 
 import pytest
 
-from tandem_dj.conversion import ConversionError, convert_to_mp3, is_lossless
+from tandem_dj.conversion import ConversionError, convert_to_mp3, needs_conversion
 
 FFMPEG = shutil.which("ffmpeg")
 needs_ffmpeg = pytest.mark.skipif(FFMPEG is None, reason="ffmpeg is not installed")
+
+
+def probe(path: Path) -> str:
+    """
+    Describe an audio file with ffprobe.
+
+    :param path: File to describe
+    :returns: Lines giving the codec, the bitrate and the title tag
+    """
+    completed = subprocess.run(
+        [
+            shutil.which("ffprobe"),
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_name,bit_rate:format_tags=title",
+            "-of",
+            "default=noprint_wrappers=1",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return completed.stdout
 
 
 def make_flac(path: Path) -> Path:
@@ -28,13 +53,45 @@ def make_flac(path: Path) -> Path:
 
 @pytest.mark.parametrize(
     ("name", "expected"),
-    [("a.flac", True), ("a.FLAC", True), ("a.wav", True), ("a.aiff", True), ("a.mp3", False), ("a.m4a", False)],
+    [
+        ("a.flac", True),
+        ("a.FLAC", True),
+        ("a.wav", True),
+        ("a.aiff", True),
+        ("a.m4a", True),
+        ("a.opus", True),
+        ("a.ogg", True),
+        ("a.mp3", False),
+        ("a.MP3", False),
+        ("cover.jpg", False),
+    ],
 )
-def test_is_lossless(name, expected):
+def test_needs_conversion(name, expected):
     """
-    Lossless formats are recognised by extension, whatever the case.
+    Every audio format other than MP3 is recognised by extension, whatever the case.
     """
-    assert is_lossless(Path(name)) is expected
+    assert needs_conversion(Path(name)) is expected
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize(
+    ("extension", "encoder_arguments"),
+    [(".m4a", ["-codec:a", "aac"]), (".ogg", ["-codec:a", "libvorbis"]), (".opus", ["-codec:a", "libopus"])],
+)
+def test_convert_to_mp3_handles_lossy_formats_and_keeps_their_tags(tmp_path, extension, encoder_arguments):
+    """
+    M4A, Ogg and Opus files become MP3 files carrying the same title, wherever the format stores its tags.
+    """
+    source_path = tmp_path / f"Artist - Test Tone{extension}"
+    subprocess.run(
+        [FFMPEG, "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1"]
+        + [*encoder_arguments, "-metadata", "title=Test Tone", str(source_path)],
+        check=True,
+    )
+    target_path = convert_to_mp3(source_path, "ffmpeg", 320)
+    assert target_path == tmp_path / "Artist - Test Tone.mp3"
+    assert not source_path.exists()
+    assert "TAG:title=Test Tone" in probe(target_path)
 
 
 @needs_ffmpeg
@@ -47,30 +104,16 @@ def test_convert_to_mp3_replaces_the_original_and_keeps_tags(tmp_path):
     assert target_path == tmp_path / "Artist - Test Tone.mp3"
     assert target_path.stat().st_size > 0
     assert not source_path.exists()
-    probe = subprocess.run(
-        [
-            shutil.which("ffprobe"),
-            "-v",
-            "error",
-            "-show_entries",
-            "stream=codec_name,bit_rate:format_tags=title",
-            "-of",
-            "default=noprint_wrappers=1",
-            str(target_path),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert "codec_name=mp3" in probe.stdout
-    assert "bit_rate=320000" in probe.stdout
-    assert "TAG:title=Test Tone" in probe.stdout
+    description = probe(target_path)
+    assert "codec_name=mp3" in description
+    assert "bit_rate=320000" in description
+    assert "TAG:title=Test Tone" in description
 
 
 @needs_ffmpeg
 def test_convert_to_mp3_never_overwrites(tmp_path):
     """
-    An existing MP3 of the same name is kept, and so is the lossless file.
+    An existing MP3 of the same name is kept, and so is the file that was to be converted.
     """
     source_path = make_flac(tmp_path / "song.flac")
     existing_path = tmp_path / "song.mp3"
@@ -96,7 +139,7 @@ def test_failed_conversion_keeps_the_original(tmp_path):
 
 def test_missing_ffmpeg_is_reported(tmp_path):
     """
-    Without ffmpeg, the lossless file is left untouched.
+    Without ffmpeg, the file is left untouched.
     """
     source_path = tmp_path / "song.flac"
     source_path.write_bytes(b"data")

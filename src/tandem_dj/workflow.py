@@ -6,7 +6,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from tandem_dj.config import Settings
-from tandem_dj.conversion import ConversionError, convert_to_mp3, is_lossless
+from tandem_dj.conversion import ConversionError, convert_to_mp3, needs_conversion
 from tandem_dj.models import Track
 from tandem_dj.sockseek import DownloadReport, SockseekDownloader
 from tandem_dj.vpn import VpnGuard
@@ -28,7 +28,7 @@ def run_download(
     keep_running: Callable[[], bool] | None = None,
 ) -> DownloadReport:
     """
-    Download tracks the safe way: behind the VPN when required, then convert lossless files to MP3.
+    Download tracks the safe way: behind the VPN when required, then convert the files that are not MP3.
 
     :param settings: User settings
     :param tracks: Tracks to download
@@ -47,28 +47,28 @@ def run_download(
     else:
         notify("VPN: not required by the settings, downloading from your own IP address.", LEVEL_WARNING)
         report = downloader.download(tracks, name, keep_running, on_output_line)
-    if settings.convert_lossless_to_mp3:
-        convert_lossless_downloads(report, settings, notify)
+    if settings.convert_to_mp3:
+        convert_downloads(report, settings, notify)
     return report
 
 
-def convert_lossless_downloads(report: DownloadReport, settings: Settings, notify: Notify) -> None:
+def convert_downloads(report: DownloadReport, settings: Settings, notify: Notify) -> None:
     """
-    Convert every lossless file of a download run to MP3, recording the new file names in the report.
+    Convert every file of a download run that is not an MP3, recording the new file names in the report.
 
     :param report: Outcome of the run; its saved file paths are updated in place
     :param settings: User settings holding the conversion preferences
     :param notify: Receiver of progress messages
     """
-    lossless_files = {
+    other_format_files = {
         track: Path(file_path)
         for track, file_path in report.saved_files.items()
-        if file_path and is_lossless(Path(file_path)) and Path(file_path).is_file()
+        if file_path and needs_conversion(Path(file_path)) and Path(file_path).is_file()
     }
-    if not lossless_files:
+    if not other_format_files:
         return
-    notify(f"Converting {len(lossless_files)} lossless files to MP3 {settings.mp3_bitrate} kbps...", LEVEL_INFORMATION)
-    for track, source_path in lossless_files.items():
+    notify(f"Converting {len(other_format_files)} files to MP3 {settings.mp3_bitrate} kbps...", LEVEL_INFORMATION)
+    for track, source_path in other_format_files.items():
         try:
             target_path = convert_to_mp3(source_path, settings.ffmpeg_executable, settings.mp3_bitrate)
         except ConversionError as error:

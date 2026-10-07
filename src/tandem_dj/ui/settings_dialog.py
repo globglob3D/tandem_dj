@@ -44,7 +44,7 @@ class SettingsDialog(tkinter.Toplevel):
         self.extra_arguments = tkinter.StringVar(self, " ".join(settings.extra_arguments))
         self.vpn_required = tkinter.BooleanVar(self, settings.vpn_required)
         self.piactl_executable = tkinter.StringVar(self, str(settings.piactl_executable))
-        self.convert_lossless_to_mp3 = tkinter.BooleanVar(self, settings.convert_lossless_to_mp3)
+        self.convert_to_mp3 = tkinter.BooleanVar(self, settings.convert_to_mp3)
         self.mp3_bitrate = tkinter.StringVar(self, str(settings.mp3_bitrate))
         self.ffmpeg_executable = tkinter.StringVar(self, settings.ffmpeg_executable)
 
@@ -68,7 +68,7 @@ class SettingsDialog(tkinter.Toplevel):
         self._add_entry(form, "piactl program", self.piactl_executable, browse=self._browse_piactl)
         self._add_heading(form, "Conversion")
         self._add_checkbox(
-            form, "Convert FLAC, WAV and AIFF downloads to MP3 and delete the original", self.convert_lossless_to_mp3
+            form, "Convert downloads in any other format to MP3 and delete the original", self.convert_to_mp3
         )
         self._add_entry(form, "MP3 bitrate (kbps)", self.mp3_bitrate)
         self._add_entry(form, "ffmpeg program", self.ffmpeg_executable, hint="name on the PATH, or full path")
@@ -193,7 +193,7 @@ class SettingsDialog(tkinter.Toplevel):
             extra_arguments=tuple(self.extra_arguments.get().split()),
             vpn_required=self.vpn_required.get(),
             piactl_executable=Path(self.piactl_executable.get().strip()),
-            convert_lossless_to_mp3=self.convert_lossless_to_mp3.get(),
+            convert_to_mp3=self.convert_to_mp3.get(),
             mp3_bitrate=mp3_bitrate,
             ffmpeg_executable=self.ffmpeg_executable.get().strip() or "ffmpeg",
         )

@@ -33,7 +33,7 @@ class Settings:
     :param extra_arguments: Extra sockseek flags appended to every run
     :param vpn_required: Whether downloads may only run while the VPN is connected
     :param piactl_executable: Path of the Private Internet Access command line tool
-    :param convert_lossless_to_mp3: Whether lossless downloads are converted to MP3
+    :param convert_to_mp3: Whether downloads in another format are converted to MP3
     :param mp3_bitrate: Bitrate, in kbps, of converted MP3 files
     :param ffmpeg_executable: Name or path of the ffmpeg program used for conversions
     """
@@ -49,7 +49,7 @@ class Settings:
     extra_arguments: tuple[str, ...]
     vpn_required: bool = True
     piactl_executable: Path = Path(DEFAULT_PIACTL_EXECUTABLE)
-    convert_lossless_to_mp3: bool = True
+    convert_to_mp3: bool = True
     mp3_bitrate: int = 320
     ffmpeg_executable: str = "ffmpeg"
 
@@ -95,7 +95,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
         extra_arguments=tuple(str(argument) for argument in sockseek.get("extra_arguments", ())),
         vpn_required=bool(vpn.get("required", True)),
         piactl_executable=_resolve_path(vpn.get("piactl", DEFAULT_PIACTL_EXECUTABLE)),
-        convert_lossless_to_mp3=bool(conversion.get("lossless_to_mp3", True)),
+        convert_to_mp3=bool(conversion.get("to_mp3", True)),
         mp3_bitrate=int(conversion.get("mp3_bitrate", 320)),
         ffmpeg_executable=str(conversion.get("ffmpeg", "ffmpeg")),
     )
@@ -142,7 +142,7 @@ def save_settings(settings: Settings, config_path: Path | None = None) -> Path:
             extra_arguments=_quote_list(settings.extra_arguments),
             vpn_required=_boolean(settings.vpn_required),
             piactl_executable=_quote(_portable_path(settings.piactl_executable)),
-            convert_lossless_to_mp3=_boolean(settings.convert_lossless_to_mp3),
+            convert_to_mp3=_boolean(settings.convert_to_mp3),
             mp3_bitrate=settings.mp3_bitrate,
             ffmpeg_executable=_quote(settings.ffmpeg_executable),
         ),
@@ -247,9 +247,9 @@ required = {vpn_required}
 piactl = {piactl_executable}
 
 [conversion]
-# When true, downloads that only exist in a lossless format (FLAC, WAV, AIFF) are converted to MP3 once the
-# download is over, keeping tags and cover art. The lossless original is deleted after a successful conversion.
-lossless_to_mp3 = {convert_lossless_to_mp3}
+# When true, downloads that only exist in another format (FLAC, WAV, AIFF, M4A, OGG, Opus...) are converted to
+# MP3 once the download is over, keeping tags and cover art. The original is deleted after a successful conversion.
+to_mp3 = {convert_to_mp3}
 mp3_bitrate = {mp3_bitrate}
 
 # Name of the ffmpeg program when it is on the PATH, or its full path.

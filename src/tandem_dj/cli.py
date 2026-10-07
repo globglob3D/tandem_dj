@@ -179,7 +179,7 @@ def show_config(config_path: Path | None) -> None:
         ("VPN for downloads", "required" if settings.vpn_required else "not required", True),
         ("VPN client", settings.piactl_executable, vpn_is_usable),
         ("VPN state", _describe_vpn(settings), True),
-        ("Lossless files", _describe_conversion(settings), True),
+        ("Other formats", _describe_conversion(settings), True),
     ]
     for label, value, is_valid in rows:
         click.echo(f"{label:<22}{value}" + ("" if is_valid else click.style("   <- missing", fg="red")))
@@ -376,7 +376,7 @@ def _print_download_plan(
         ("Download history", settings.index_path),
         ("sockseek input file", input_path),
         ("VPN", f"required, currently {_describe_vpn(settings)}" if settings.vpn_required else "not required"),
-        ("Lossless files", _describe_conversion(settings)),
+        ("Other formats", _describe_conversion(settings)),
         ("sockseek command", downloader.describe_command(input_path, requested_tracks)),
     ]
     click.secho("\nDownload plan", bold=True)
@@ -434,12 +434,12 @@ def _format_duration(duration_seconds: int | None) -> str:
 
 def _describe_conversion(settings: Settings) -> str:
     """
-    Describe what happens to lossless downloads.
+    Describe what happens to downloads that are not MP3.
 
     :param settings: User settings holding the conversion preferences
     :returns: A short sentence for display
     """
-    if not settings.convert_lossless_to_mp3:
+    if not settings.convert_to_mp3:
         return "kept as downloaded"
     return f"converted to MP3 {settings.mp3_bitrate} kbps with {settings.ffmpeg_executable}, originals deleted"
 

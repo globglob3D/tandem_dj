@@ -33,9 +33,9 @@ required = true
 piactl = "C:/Program Files/Private Internet Access/piactl.exe"
 
 [conversion]
-# When true, downloads that only exist in a lossless format (FLAC, WAV, AIFF) are converted to MP3 once the
-# download is over, keeping tags and cover art. The lossless original is deleted after a successful conversion.
-lossless_to_mp3 = true
+# When true, downloads that only exist in another format (FLAC, WAV, AIFF, M4A, OGG, Opus...) are converted to
+# MP3 once the download is over, keeping tags and cover art. The original is deleted after a successful conversion.
+to_mp3 = true
 mp3_bitrate = 320
 
 # Name of the ffmpeg program when it is on the PATH, or its full path.

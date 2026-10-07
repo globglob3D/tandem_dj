@@ -49,9 +49,9 @@ def test_vpn_is_required_unless_the_settings_say_otherwise(tmp_path):
 
 
 @pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file() or FFMPEG is None, reason="needs sockseek and ffmpeg")
-def test_run_download_reports_progress_and_converts_lossless_files(tmp_path):
+def test_run_download_reports_progress_and_converts_other_formats(tmp_path):
     """
-    A lossless file found by sockseek is followed live, saved, converted to MP3 and reported under its new name.
+    A file found in another format is followed live, saved, converted to MP3 and reported under its new name.
     """
     shared_files = tmp_path / "shared"
     shared_files.mkdir()

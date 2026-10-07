@@ -31,7 +31,7 @@ src/tandem_dj/
   text_cleaning.py   upload title cleaning and "Artist - Title" splitting (shared by YouTube, SoundCloud, text)
   sockseek.py        SockseekDownloader: CSV input file, command line, report from the sockseek index
   vpn.py             VpnGuard: context manager around Private Internet Access (piactl)
-  conversion.py      convert_to_mp3(): lossless files to MP3 through ffmpeg
+  conversion.py      convert_to_mp3(): any other audio format to MP3 through ffmpeg
   sources/
     __init__.py      read_tracks() / read_track_lines(): the only entry points; WEBSITE_SOURCES registry
     base.py          TrackSource abstract class, SourceError
@@ -55,7 +55,7 @@ data/                runtime state (untracked): sockseek_index.csv, inputs/*.csv
 3. Inside a `VpnGuard`, `SockseekDownloader.download()` removes duplicates, writes `data/inputs/<name>.csv`
    (columns `Artist,Title,Album[,Length]`), runs sockseek once on it with inherited stdio, then classifies each
    track from `data/sockseek_index.csv`. `keep_running=guard.is_connected` stops sockseek if the VPN drops.
-4. After the VPN is off again, lossless files among `report.saved_files` are converted to MP3.
+4. After the VPN is off again, files among `report.saved_files` that are not MP3 are converted to MP3.
 
 Steps 3 and 4 are `workflow.run_download()`. It reports through a `notify(message, level)` callback, so the CLI
 prints with colours and the window logs; neither contains download logic of its own.
@@ -82,7 +82,7 @@ prints with colours and the window logs; neither contains download logic of its 
   mock mode for tests. `[vpn] required` defaults to `true` even when the section is missing.
 - **Show what is really used**: every run prints the exact artist and title sent to sockseek, the plan, and the
   file each track was saved as. Keep output informative when adding features.
-- **MP3 is the wanted format**; lossless downloads are converted.
+- **MP3 is the wanted format**; every download in another format is converted, lossy ones included.
 - **The window is the main way to use the tool**; keep the CLI and terminal output working as the backup, and add
   new features to both through shared modules.
 
@@ -126,8 +126,10 @@ Errors meant for the user are dedicated exceptions (`SourceError`, `DownloadErro
   `piactl background enable`, which the guard runs when a first attempt is refused.
 - **Two sockseek processes must not log in at once** with the same Soulseek account: the second login kicks the
   first.
-- **Conversion** deletes the lossless original only after ffmpeg produced a non-empty MP3, and never overwrites an
-  existing MP3. The sockseek index keeps the old `.flac` path, which is harmless: skipping does not check files.
+- **Conversion** deletes the original only after ffmpeg produced a non-empty MP3, and never overwrites an
+  existing MP3. When the cover art cannot be carried into an MP3, ffmpeg is run a second time without it. Tags are
+  mapped from the file and from its audio stream, because Ogg and Opus keep them on the stream. The sockseek index
+  keeps the old path (such as `.flac`), which is harmless: skipping does not check files.
 - **Offline testing**: sockseek's `--mock-files-dir <folder> --mock-files-no-read-tags` replaces the Soulseek
   network with local files. `tests/test_sockseek.py` uses it through `extra_arguments`.
 - **Spotify**: the embed page (`open.spotify.com/embed/<kind>/<id>`) holds an anonymous access token and at most
