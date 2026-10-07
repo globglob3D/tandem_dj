@@ -27,6 +27,7 @@ def test_settings_survive_a_save_and_load(tmp_path):
         vpn_mode=VPN_MODE_MANUAL,
         mp3_bitrate=256,
         ffmpeg_executable="my-ffmpeg",
+        relaxed_search=False,
     )
     path = save_settings(settings, tmp_path / "nested" / "config.toml")
     assert load_settings(path) == settings

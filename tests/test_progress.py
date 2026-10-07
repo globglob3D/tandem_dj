@@ -16,6 +16,7 @@ from tandem_dj.progress import (
     format_seconds,
     format_size,
 )
+from tandem_dj.search_variants import SearchVariant
 
 AVERY = Track(artists=("Daniel Avery",), title="Naive Response")
 DARUDE = Track(artists=("Darude",), title="Feel the Beat")
@@ -223,3 +224,55 @@ def test_formatting_helpers():
     assert format_seconds(45) == "45 s"
     assert format_seconds(200) == "3 min 20 s"
     assert format_seconds(3900) == "1 h 05 min"
+
+
+def test_events_of_a_simpler_spelling_reach_the_track_it_stands_for():
+    """
+    When a failed track is searched again under another spelling, it goes back to waiting and the events naming
+    that spelling update it.
+    """
+    accented = Track(artists=("Sköne",), title="L'arrêt sur image")
+    other = Track(artists=("Darude",), title="Feel the Beat")
+    tracker = ProgressTracker([accented, other])
+    tracker.handle_line(
+        json.dumps(
+            {
+                "type": "track_state",
+                "timestamp": "2026-10-07T15:37:01Z",
+                "data": {
+                    "artist": "Sköne",
+                    "title": "L'arrêt sur image",
+                    "lifecycleState": "Terminal",
+                    "terminalOutcome": "Failed",
+                    "failureReason": "NoSuitableFileFound",
+                },
+            }
+        )
+    )
+    assert tracker.snapshot()[0].status == STATUS_FAILED
+
+    tracker.follow_variants({accented: SearchVariant("", "arret sur image", "title alone, without the artist")})
+    waiting = tracker.snapshot()[0]
+    assert (waiting.status, waiting.relaxed_query) == (STATUS_WAITING, "arret sur image")
+    assert waiting.detail == 'searching again as "arret sur image"'
+
+    tracker.handle_line(
+        json.dumps(
+            {
+                "type": "track_state",
+                "timestamp": "2026-10-07T15:38:01Z",
+                "data": {
+                    "artist": "",
+                    "title": "arret sur image",
+                    "lifecycleState": "Terminal",
+                    "terminalOutcome": "Succeeded",
+                    "downloadPath": "D:/music/arret_sur_image.mp3",
+                    "size": 5_000_000,
+                },
+            }
+        )
+    )
+    found, untouched = tracker.snapshot()
+    assert (found.status, found.saved_path) == (STATUS_DOWNLOADED, "D:/music/arret_sur_image.mp3")
+    assert found.relaxed_query == "arret sur image"
+    assert (untouched.status, untouched.relaxed_query) == (STATUS_WAITING, "")

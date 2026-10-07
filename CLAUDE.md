@@ -35,6 +35,7 @@ src/tandem_dj/
   config.py          Settings dataclass, load_settings() / save_settings() for config.toml
   models.py          Track, TrackCollection
   text_cleaning.py   upload title cleaning and "Artist - Title" splitting (shared by YouTube, SoundCloud, text)
+  search_variants.py relaxed_search_variants(): simpler spellings of a track that was not found
   sockseek.py        SockseekDownloader: CSV input file, command line, report from the sockseek index
   vpn.py             VPN modes; VpnGuard (Private Internet Access through piactl), AddressWatch (user's own VPN)
   conversion.py      convert_to_mp3(): any other audio format to MP3 through ffmpeg
@@ -65,9 +66,11 @@ macOS. It holds `config.toml` (with the Soulseek password), `data/sockseek_index
 3. Inside a `VpnGuard`, `SockseekDownloader.download()` removes duplicates, writes `data/inputs/<name>.csv`
    (columns `Artist,Title,Album[,Length]`), runs sockseek once on it, then classifies each track from
    `data/sockseek_index.csv`. `keep_running=guard.is_connected` stops sockseek if the VPN drops.
-4. After the VPN is off again, files among `report.saved_files` that are not MP3 are converted to MP3.
+4. Still inside the VPN protection, `search_failed_tracks_again()` runs up to four more sockseek passes on the
+   tracks in `report.failed`, each under its next `SearchVariant` (see "Relaxed search" below).
+5. After the VPN is off again, files among `report.saved_files` that are not MP3 are converted to MP3.
 
-Steps 3 and 4 are `workflow.run_download()`. It reports through a `notify(message, level)` callback, which the
+Steps 3 to 5 are `workflow.run_download()`. It reports through a `notify(message, level)` callback, which the
 window sends to its log pane and to the log file, and asks the user through a `confirm(question)` callback.
 
 Step 3 depends on `Settings.vpn_mode`:
@@ -98,6 +101,24 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 - To check the window by eye, drive `MainWindow` against a temporary settings file with
   `extra_arguments = ("--mock-files-dir", <folder>, "--mock-files-slow")` and `vpn_mode = "none"`.
 - `tests/test_ui.py` shares one hidden window per module: starting Tk several times in a process fails at random.
+
+### Relaxed search
+
+- `relaxed_search_variants(track)` returns the spellings to try in order: accents folded, then elided articles and
+  punctuation removed, then decorations removed (`strip_decorations()` keeps remix and edit names on purpose), then
+  the title alone. Round N of `search_failed_tracks_again()` searches every still-missing track under its Nth
+  variant; two tracks never share a spelling within a round.
+- `SockseekDownloader.download_variants()` runs sockseek with **an index of its own** (deleted afterwards), then
+  `record_downloads()` marks the found tracks as downloaded in the download history **under their real name**. The
+  history therefore never holds a search spelling, and "already downloaded" keeps working for those tracks.
+- Variants keep the `Length` column, so sockseek's 3 second tolerance still filters wrong recordings.
+- Tracks found this way are in `report.relaxed_matches`; the window shows them as `Downloaded - check`
+  (`theme.STATUS_FOUND_RELAXED`). Keep that flag visible: a looser search can return the wrong recording.
+- `ProgressTracker.follow_variants()` is called before each round (through `on_search_variants`), so that progress
+  events naming a variant update the row of the track it stands for.
+- Measured in sockseek's mock mode: searching `Artiste - L'arrêt sur image` finds `L arret sur image.mp3` and
+  `Larret sur image.mp3` but not `artiste_-_arret_sur_image.mp3`; searching `arret sur image` finds the latter.
+  Underscores and hyphens in file names need no variant. `--desperate` changed nothing there.
 
 ### Logs and debugging
 

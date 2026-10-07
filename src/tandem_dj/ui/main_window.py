@@ -38,7 +38,7 @@ from tandem_dj.sources import SourceError, read_track_lines, read_tracks
 from tandem_dj.text_cleaning import track_key
 from tandem_dj.ui import theme
 from tandem_dj.ui.settings_dialog import SettingsDialog
-from tandem_dj.ui.theme import STATUS_NOT_FINISHED
+from tandem_dj.ui.theme import STATUS_FOUND_RELAXED, STATUS_NOT_FINISHED
 from tandem_dj.vpn import VPN_MODE_MANUAL, VPN_MODE_NONE, VpnError, VpnGuard
 from tandem_dj.workflow import (
     LEVEL_ERROR,
@@ -421,6 +421,7 @@ class MainWindow(tkinter.Tk):
             confirm=self._confirm,
             on_output_line=handle_output_line,
             keep_running=lambda: not self.stop_requested.is_set(),
+            on_search_variants=tracker.follow_variants,
         )
         self.messages.put(("finished", report))
 
@@ -573,7 +574,9 @@ class MainWindow(tkinter.Tk):
         Redraw the rows and the summary bar from the live progress.
         """
         for entry in self.tracker.snapshot():
-            self._show_row(entry.track, entry.status, _describe_progress(entry), entry)
+            found_relaxed = entry.status == STATUS_DOWNLOADED and entry.relaxed_query
+            status = STATUS_FOUND_RELAXED if found_relaxed else entry.status
+            self._show_row(entry.track, status, _describe_progress(entry), entry)
         summary = self.tracker.summary()
         self.overall_bar.configure(maximum=max(summary.total_count, 1), value=summary.finished_count)
         parts = [
@@ -625,12 +628,15 @@ class MainWindow(tkinter.Tk):
         }
         for track in report.downloaded:
             file_name = Path(report.saved_files.get(track, "")).name
+            relaxed_match = report.relaxed_matches.get(track)
             self._show_row(
                 track,
-                STATUS_DOWNLOADED,
+                STATUS_FOUND_RELAXED if relaxed_match else STATUS_DOWNLOADED,
                 _draw_bar(100),
                 live_entries.get(_row_identifier(track)),
-                f"saved as {file_name}",
+                f'saved as {file_name}, found by searching "{relaxed_match.query}": check it'
+                if relaxed_match
+                else f"saved as {file_name}",
             )
         for track in report.already_downloaded:
             self._show_row(track, STATUS_ALREADY_DOWNLOADED, "", None, "skipped, downloaded by an earlier run")
@@ -641,8 +647,14 @@ class MainWindow(tkinter.Tk):
             self._show_row(track, STATUS_NOT_FINISHED, "", None, "run Download again to retry")
         finished_count = len(report.downloaded) + len(report.already_downloaded) + len(report.failed)
         self.overall_bar.configure(value=finished_count)
+        relaxed_note = (
+            f" ({len(report.relaxed_matches)} found under a simpler spelling: check them)"
+            if report.relaxed_matches
+            else ""
+        )
         text = (
-            f"Finished: {len(report.downloaded)} downloaded, {len(report.already_downloaded)} already had, "
+            f"Finished: {len(report.downloaded)} downloaded{relaxed_note}, "
+            f"{len(report.already_downloaded)} already had, "
             f"{len(report.failed)} not found or failed, {len(report.not_attempted)} not finished."
         )
         self.summary_label.configure(text=text)

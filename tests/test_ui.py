@@ -15,6 +15,7 @@ from tandem_dj import logs
 from tandem_dj.config import default_settings, load_settings, save_settings
 from tandem_dj.models import Track, TrackCollection
 from tandem_dj.progress import STATUS_ALREADY_DOWNLOADED, STATUS_DOWNLOADING, STATUS_WAITING, ProgressTracker
+from tandem_dj.search_variants import SearchVariant
 from tandem_dj.sockseek import DownloadReport
 from tandem_dj.ui import main_window
 from tandem_dj.ui.main_window import MainWindow
@@ -116,6 +117,27 @@ def test_live_progress_and_final_report_reach_the_table(window):
     assert cells(window, 1)["detail"] == "saved as Darude - Feel The Beat.mp3"
     assert cells(window, 0)["status"] == "Not finished"
     assert "1 downloaded" in window.summary_label.cget("text")
+
+
+def test_track_found_under_a_simpler_spelling_is_flagged_for_a_check(window):
+    """
+    A relaxed match stands out in the table and names the search that found it.
+    """
+    collection = TrackCollection(name="Son 2 Teuf", origin="spotify", tracks=[SKONE, DARUDE])
+    window._show_tracks(collection, [SKONE, DARUDE], duplicate_count=0, already_downloaded=[])
+    window.tracker = None
+    report = DownloadReport(
+        downloaded=[DARUDE, SKONE],
+        saved_files={DARUDE: "D:/music/Darude - Feel The Beat.mp3", SKONE: "D:/music/skone_afterlife.mp3"},
+        relaxed_matches={SKONE: SearchVariant("Skone", "Afterlife", "without accents")},
+    )
+    window._show_report(report)
+    assert cells(window, 0)["status"] == "Downloaded - check"
+    assert (
+        cells(window, 0)["detail"] == 'saved as skone_afterlife.mp3, found by searching "Skone - Afterlife": check it'
+    )
+    assert cells(window, 1)["status"] == "Downloaded"
+    assert "2 downloaded (1 found under a simpler spelling: check them)" in window.summary_label.cget("text")
 
 
 def test_window_messages_go_to_the_log_pane_and_the_log_file(window, tmp_path):

@@ -40,6 +40,7 @@ def describe_setup(settings: Settings, config_path: Path | None = None) -> list[
         f"ffmpeg: {ffmpeg_path or MISSING}",
         f"Preferred quality: {', '.join(settings.preferred_formats) or 'any format'}, "
         f">= {settings.preferred_minimum_bitrate} kbps",
+        f"Relaxed search for tracks not found: {'on' if settings.relaxed_search else 'off'}",
         f"File naming: {settings.name_format}",
         f"Extra sockseek flags: {' '.join(settings.extra_arguments) or 'none'}",
         f"VPN mode: {settings.vpn_mode}",

@@ -4,11 +4,13 @@ Live download progress, rebuilt from the JSON events sockseek prints with ``--pr
 
 import json
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from tandem_dj.models import Track
+from tandem_dj.search_variants import SearchVariant
 from tandem_dj.text_cleaning import track_key
 
 STATUS_WAITING = "Waiting"
@@ -37,6 +39,7 @@ class ProgressTracker:
         self._lock = threading.Lock()
         self._entries = {track_key(track.primary_artist, track.title): TrackProgress(track=track) for track in tracks}
         self._entry_by_job: dict[str, TrackProgress] = {}
+        self._entry_by_variant: dict[tuple[str, str], TrackProgress] = {}
         self._started_at: datetime | None = None
         self._latest_at: datetime | None = None
 
@@ -59,6 +62,25 @@ class ProgressTracker:
         with self._lock:
             self._handle_event(event)
         return None
+
+    def follow_variants(self, variants: Mapping[Track, SearchVariant]) -> None:
+        """
+        Expect the next events of some tracks under another spelling, as when they are searched again.
+
+        Those tracks go back to waiting, and events naming a variant are applied to the track it stands for.
+
+        :param variants: Spelling each track is about to be searched under
+        """
+        with self._lock:
+            self._entry_by_variant = {}
+            for track, variant in variants.items():
+                entry = self._entries.get(track_key(track.primary_artist, track.title))
+                if entry is None:
+                    continue
+                self._entry_by_variant[track_key(variant.artist, variant.title)] = entry
+                entry.status, entry.relaxed_query = STATUS_WAITING, variant.query
+                entry.detail = f'searching again as "{variant.query}"'
+                entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
 
     def snapshot(self) -> list["TrackProgress"]:
         """
@@ -198,9 +220,10 @@ class ProgressTracker:
         Find the entry of the track an event talks about.
 
         :param description: Event data carrying ``artist`` and ``title``
-        :returns: The matching entry, or ``None`` when the track was not requested
+        :returns: The entry of the track, or of the track this spelling stands for; ``None`` when there is none
         """
-        return self._entries.get(track_key(str(description.get("artist") or ""), str(description.get("title") or "")))
+        key = track_key(str(description.get("artist") or ""), str(description.get("title") or ""))
+        return self._entry_by_variant.get(key) or self._entries.get(key)
 
 
 @dataclass
@@ -215,6 +238,7 @@ class TrackProgress:
     :param total_bytes: Size of the file being received, ``0`` when unknown
     :param speed_bytes_per_second: Current transfer speed
     :param saved_path: Path the file was saved to, empty until the track is downloaded
+    :param relaxed_query: Simpler spelling the track is or was last searched under, empty for the exact search
     :param progress_at: Time of the latest transfer progress event
     """
 
@@ -225,6 +249,7 @@ class TrackProgress:
     total_bytes: int = 0
     speed_bytes_per_second: float = 0.0
     saved_path: str = ""
+    relaxed_query: str = ""
     progress_at: datetime | None = field(default=None, repr=False)
 
     @property

@@ -31,6 +31,7 @@ class Settings:
     :param name_format: File naming pattern, in sockseek's ``--name-format`` syntax
     :param preferred_formats: File formats to pick first when several are available
     :param preferred_minimum_bitrate: Bitrate, in kbps, below which a file is only a fallback
+    :param relaxed_search: Whether tracks that are not found are searched again under simpler spellings
     :param sockseek_executable: Path of the sockseek program
     :param index_path: Path of the download history kept by sockseek
     :param extra_arguments: Extra sockseek flags appended to every run
@@ -56,6 +57,7 @@ class Settings:
     convert_to_mp3: bool = True
     mp3_bitrate: int = 320
     ffmpeg_executable: str = ""
+    relaxed_search: bool = True
 
 
 def load_settings(config_path: Path | None = None) -> Settings:
@@ -100,6 +102,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
         convert_to_mp3=bool(conversion.get("to_mp3", True)),
         mp3_bitrate=int(conversion.get("mp3_bitrate", 320)),
         ffmpeg_executable=str(conversion.get("ffmpeg", "")),
+        relaxed_search=bool(download.get("relaxed_search", True)),
     )
 
 
@@ -149,6 +152,7 @@ def save_settings(settings: Settings, config_path: Path | None = None) -> Path:
             convert_to_mp3=_boolean(settings.convert_to_mp3),
             mp3_bitrate=settings.mp3_bitrate,
             ffmpeg_executable=_quote(settings.ffmpeg_executable),
+            relaxed_search=_boolean(settings.relaxed_search),
         ),
         encoding="utf-8",
         newline="\n",
@@ -234,6 +238,10 @@ name_format = {name_format}
 # Soft preferences: files matching them are picked first, anything else is still accepted as a fallback.
 preferred_formats = {preferred_formats}
 preferred_minimum_bitrate = {preferred_minimum_bitrate}
+
+# When true, tracks that are not found are searched again under simpler spellings: without accents, without
+# articles and punctuation, without decorations such as (Original Mix), and finally by title alone.
+relaxed_search = {relaxed_search}
 
 [sockseek]
 # Path of another sockseek program; empty to use the one shipped with the application.

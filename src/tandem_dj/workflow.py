@@ -2,13 +2,15 @@
 The download procedure: VPN, sockseek, then conversion.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from tandem_dj.config import Settings
 from tandem_dj.conversion import ConversionError, convert_to_mp3, needs_conversion
 from tandem_dj.models import Track
+from tandem_dj.search_variants import SearchVariant, relaxed_search_variants
 from tandem_dj.sockseek import DownloadReport, SockseekDownloader
+from tandem_dj.text_cleaning import track_key
 from tandem_dj.vpn import (
     VPN_MODE_MANUAL,
     VPN_MODE_PIA,
@@ -40,6 +42,8 @@ NO_VPN_QUESTION = (
 
 Notify = Callable[[str, str], None]
 Confirm = Callable[[str], bool]
+OutputLineReceiver = Callable[[str], None]
+SearchVariantsReceiver = Callable[[Mapping[Track, SearchVariant]], None]
 
 
 def run_download(
@@ -48,11 +52,14 @@ def run_download(
     name: str,
     notify: Notify,
     confirm: Confirm,
-    on_output_line: Callable[[str], None] | None = None,
+    on_output_line: OutputLineReceiver | None = None,
     keep_running: Callable[[], bool] | None = None,
+    on_search_variants: SearchVariantsReceiver | None = None,
 ) -> DownloadReport:
     """
     Download tracks with the protection chosen in the settings, then convert the files that are not MP3.
+
+    Tracks that are not found are searched again under simpler spellings, when the settings allow it.
 
     :param settings: User settings
     :param tracks: Tracks to download
@@ -62,6 +69,7 @@ def run_download(
         Private Internet Access does not protect
     :param on_output_line: Receiver of every line sockseek prints; without it sockseek prints to the console
     :param keep_running: Extra condition checked every few seconds; sockseek is stopped once it returns ``False``
+    :param on_search_variants: Told which spelling each track is searched under, before every further search
     :returns: The outcome of every requested track, with converted file names
     :raises DownloadError: If sockseek or the output folder is not available
     :raises VpnError: If the VPN cannot be connected or confirmed
@@ -69,12 +77,27 @@ def run_download(
     """
     downloader = SockseekDownloader(settings)
     downloader.check_ready()
+
+    def download(may_continue: Callable[[], bool] | None) -> DownloadReport:
+        """
+        Run sockseek on the tracks, then on simpler spellings of the ones it did not find.
+
+        :param may_continue: Condition to keep sockseek running, as tightened by the VPN protection in use
+        :returns: The outcome of every requested track
+        """
+        report = downloader.download(tracks, name, may_continue, on_output_line)
+        if settings.relaxed_search:
+            search_failed_tracks_again(
+                downloader, report, name, notify, may_continue, on_output_line, on_search_variants
+            )
+        return report
+
     if settings.vpn_mode == VPN_MODE_PIA:
-        report = _download_behind_vpn(downloader, tracks, name, notify, on_output_line, keep_running)
+        report = _download_behind_vpn(downloader, download, notify, keep_running)
     elif settings.vpn_mode == VPN_MODE_MANUAL:
-        report = _download_behind_own_vpn(downloader, tracks, name, notify, confirm, on_output_line, keep_running)
+        report = _download_behind_own_vpn(download, notify, confirm, keep_running)
     else:
-        report = _download_without_vpn(downloader, tracks, name, notify, confirm, on_output_line, keep_running)
+        report = _download_without_vpn(download, notify, confirm, keep_running)
     if settings.convert_to_mp3:
         convert_downloads(report, settings, notify)
     return report
@@ -106,6 +129,90 @@ def convert_downloads(report: DownloadReport, settings: Settings, notify: Notify
         notify(f"Converted {source_path.name}  ->  {target_path.name}  (original deleted)", LEVEL_INFORMATION)
 
 
+def search_failed_tracks_again(
+    downloader: SockseekDownloader,
+    report: DownloadReport,
+    name: str,
+    notify: Notify,
+    keep_running: Callable[[], bool] | None = None,
+    on_output_line: OutputLineReceiver | None = None,
+    on_search_variants: SearchVariantsReceiver | None = None,
+) -> None:
+    """
+    Search the tracks sockseek did not find under simpler spellings, one round per level of simplification.
+
+    Each round runs sockseek once on the tracks still missing, each under its next spelling. Tracks found this way
+    move from the failed to the downloaded tracks of the report and are recorded as relaxed matches, because a
+    looser search can return another recording.
+
+    :param downloader: Downloader configured with the user settings
+    :param report: Outcome of the exact search; updated in place
+    :param name: Name of the batch
+    :param notify: Receiver of progress messages
+    :param keep_running: Condition to keep searching; no round starts once it returns ``False``
+    :param on_output_line: Receiver of every line sockseek prints
+    :param on_search_variants: Told which spelling each track is searched under, before every round
+    """
+    variants_by_track = {track: relaxed_search_variants(track) for track in report.failed}
+    round_count = max((len(variants) for variants in variants_by_track.values()), default=0)
+    for round_number in range(round_count):
+        if report.stopped_early or (keep_running is not None and not keep_running()):
+            return
+        searches = _pick_searches(report.failed, variants_by_track, round_number)
+        if not searches:
+            continue
+        notify(
+            f"Not found under their exact name: {len(report.failed)} tracks. "
+            f"Searching {len(searches)} of them again under a simpler spelling (round {round_number + 1})...",
+            LEVEL_INFORMATION,
+        )
+        for track, variant in searches.items():
+            notify(
+                f'  {track.display_name}  ->  searching "{variant.query}" ({variant.description})', LEVEL_INFORMATION
+            )
+        if on_search_variants is not None:
+            on_search_variants(searches)
+        saved_files, stopped_early = downloader.download_variants(searches, name, keep_running, on_output_line)
+        for track, file_path in saved_files.items():
+            report.failed.remove(track)
+            report.downloaded.append(track)
+            report.saved_files[track] = file_path
+            report.relaxed_matches[track] = searches[track]
+            notify(
+                f'Found by searching "{searches[track].query}": {track.display_name}  ->  {Path(file_path).name}. '
+                "Check that it is the right track.",
+                LEVEL_WARNING,
+            )
+        report.stopped_early = report.stopped_early or stopped_early
+
+
+def _pick_searches(
+    failed_tracks: Sequence[Track], variants_by_track: Mapping[Track, Sequence[SearchVariant]], round_number: int
+) -> dict[Track, SearchVariant]:
+    """
+    Choose the spelling each missing track is searched under in one round.
+
+    Two tracks are never searched under the same spelling in a round, since the result could not be told apart.
+
+    :param failed_tracks: Tracks still missing
+    :param variants_by_track: Spellings of each track, from the closest to the loosest
+    :param round_number: Position of the round, starting at 0
+    :returns: The spelling to search for, for each track that has one in this round
+    """
+    searches: dict[Track, SearchVariant] = {}
+    taken_keys: set[tuple[str, str]] = set()
+    for track in failed_tracks:
+        variants = variants_by_track.get(track, ())
+        if round_number >= len(variants):
+            continue
+        variant = variants[round_number]
+        key = track_key(variant.artist, variant.title)
+        if key not in taken_keys:
+            taken_keys.add(key)
+            searches[track] = variant
+    return searches
+
+
 class DownloadCancelled(Exception):
     """
     Raised when the user declined the question asked before a download that the application cannot protect.
@@ -114,20 +221,16 @@ class DownloadCancelled(Exception):
 
 def _download_behind_vpn(
     downloader: SockseekDownloader,
-    tracks: Sequence[Track],
-    name: str,
+    download: Callable[[Callable[[], bool] | None], DownloadReport],
     notify: Notify,
-    on_output_line: Callable[[str], None] | None,
     keep_running: Callable[[], bool] | None,
 ) -> DownloadReport:
     """
     Run sockseek with Private Internet Access connected for exactly the duration of the download.
 
     :param downloader: Downloader configured with the user settings
-    :param tracks: Tracks to download
-    :param name: Name of the batch
+    :param download: Runs sockseek while the condition it is given holds
     :param notify: Receiver of progress messages
-    :param on_output_line: Receiver of every line sockseek prints
     :param keep_running: Extra condition to keep sockseek running, on top of the VPN staying connected
     :returns: The outcome of every requested track
     :raises VpnError: If the VPN cannot be connected or confirmed
@@ -146,7 +249,7 @@ def _download_behind_vpn(
     with guard:
         was_connected_by_guard = guard.connected_by_guard
         notify(f"VPN: {guard.describe()}", LEVEL_SUCCESS)
-        report = downloader.download(tracks, name, vpn_is_up_and_run_is_wanted, on_output_line)
+        report = download(vpn_is_up_and_run_is_wanted)
         vpn_dropped = report.stopped_early and not guard.is_connected()
     if vpn_dropped:
         notify("VPN: the connection dropped, so sockseek was stopped rather than run without it.", LEVEL_ERROR)
@@ -160,12 +263,9 @@ def _download_behind_vpn(
 
 
 def _download_behind_own_vpn(
-    downloader: SockseekDownloader,
-    tracks: Sequence[Track],
-    name: str,
+    download: Callable[[Callable[[], bool] | None], DownloadReport],
     notify: Notify,
     confirm: Confirm,
-    on_output_line: Callable[[str], None] | None,
     keep_running: Callable[[], bool] | None,
 ) -> DownloadReport:
     """
@@ -173,12 +273,9 @@ def _download_behind_own_vpn(
 
     Sockseek is stopped when that address changes or can no longer be read, which is what a dropped VPN looks like.
 
-    :param downloader: Downloader configured with the user settings
-    :param tracks: Tracks to download
-    :param name: Name of the batch
+    :param download: Runs sockseek while the condition it is given holds
     :param notify: Receiver of progress messages
     :param confirm: Asks the user whether the visible address is the one of their VPN
-    :param on_output_line: Receiver of every line sockseek prints
     :param keep_running: Extra condition to keep sockseek running, on top of the address staying the same
     :returns: The outcome of every requested track
     :raises VpnError: If the address the internet sees cannot be read
@@ -194,9 +291,7 @@ def _download_behind_own_vpn(
         raise DownloadCancelled
     notify(f"VPN: connected by you, approved while the internet sees {location.describe()}", LEVEL_SUCCESS)
     watch = AddressWatch(location.address)
-    report = downloader.download(
-        tracks, name, lambda: watch.is_unchanged() and (keep_running is None or keep_running()), on_output_line
-    )
+    report = download(lambda: watch.is_unchanged() and (keep_running is None or keep_running()))
     if watch.has_changed:
         notify(
             f"VPN: the address the internet sees changed to {watch.latest_address}, so sockseek was stopped.",
@@ -210,23 +305,17 @@ def _download_behind_own_vpn(
 
 
 def _download_without_vpn(
-    downloader: SockseekDownloader,
-    tracks: Sequence[Track],
-    name: str,
+    download: Callable[[Callable[[], bool] | None], DownloadReport],
     notify: Notify,
     confirm: Confirm,
-    on_output_line: Callable[[str], None] | None,
     keep_running: Callable[[], bool] | None,
 ) -> DownloadReport:
     """
     Run sockseek from the user's own address, once they accepted the risk.
 
-    :param downloader: Downloader configured with the user settings
-    :param tracks: Tracks to download
-    :param name: Name of the batch
+    :param download: Runs sockseek while the condition it is given holds
     :param notify: Receiver of progress messages
     :param confirm: Asks the user whether to download without a VPN
-    :param on_output_line: Receiver of every line sockseek prints
     :param keep_running: Condition to keep sockseek running
     :returns: The outcome of every requested track
     :raises DownloadCancelled: If the user did not accept the risk
@@ -236,7 +325,7 @@ def _download_without_vpn(
     if not confirm(NO_VPN_QUESTION.format(location=described_location)):
         raise DownloadCancelled
     notify(f"VPN: none, downloading from your own IP address{described_location}.", LEVEL_WARNING)
-    report = downloader.download(tracks, name, keep_running, on_output_line)
+    report = download(keep_running)
     if report.stopped_early:
         notify(STOPPED_EARLY_MESSAGE, LEVEL_WARNING)
     return report

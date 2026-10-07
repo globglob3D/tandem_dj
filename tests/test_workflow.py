@@ -249,3 +249,126 @@ def test_run_download_reports_progress_and_converts_other_formats(tmp_path, monk
     assert any("SongJob" in line for line in log_lines)
     assert notifications[0][1] == LEVEL_WARNING and "VPN: none" in notifications[0][0]
     assert any("Converted Test Artist - Test Tone.flac" in message for message, _ in notifications)
+
+
+@pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file(), reason="sockseek is not installed in vendor/sockseek")
+def test_run_download_finds_tracks_under_simpler_spellings(tmp_path, monkeypatch):
+    """
+    A track whose file is named without accents or article is found by a later, simpler search, reported as a
+    relaxed match to check, and skipped by the next run. Without the setting it stays not found.
+    """
+    monkeypatch.setattr(workflow, "lookup_visible_location", lambda: HOME_LOCATION)
+    shared_files = tmp_path / "shared"
+    shared_files.mkdir()
+    (shared_files / "Darude - Feel the Beat.mp3").write_bytes(b"not really audio")
+    (shared_files / "skone_-_arret_sur_image.mp3").write_bytes(b"not really audio either")
+    settings = dataclasses.replace(
+        make_settings(tmp_path, VPN_MODE_NONE),
+        extra_arguments=("--mock-files-dir", str(shared_files), "--mock-files-no-read-tags"),
+    )
+    accented = Track(artists=("Sköne",), title="L'arrêt sur image")
+    missing = Track(artists=("Nobody Real",), title="Missing Song")
+    tracks = [TRACK, accented, missing]
+    notifications: list[tuple[str, str]] = []
+
+    def notify(message: str, level: str) -> None:
+        """
+        Keep a progress message.
+
+        :param message: Message of the download procedure
+        :param level: Importance of the message
+        """
+        notifications.append((message, level))
+
+    strict_settings = dataclasses.replace(settings, relaxed_search=False, index_path=tmp_path / "strict" / "index.csv")
+    strict_report = run_download(strict_settings, tracks, "strict", notify, lambda question: True)
+    assert strict_report.downloaded == [TRACK]
+    assert strict_report.failed == [accented, missing]
+    assert strict_report.relaxed_matches == {}
+    for saved_file in settings.output_directory.iterdir():
+        saved_file.unlink()
+
+    tracker = ProgressTracker(tracks)
+    followed_queries: list[list[str]] = []
+
+    def follow(variants) -> None:
+        """
+        Record the spellings of a round and let the tracker follow them.
+
+        :param variants: Spelling each track is searched under
+        """
+        followed_queries.append([variant.query for variant in variants.values()])
+        tracker.follow_variants(variants)
+
+    notifications.clear()
+    report = run_download(
+        settings,
+        tracks,
+        "relaxed",
+        notify,
+        lambda question: True,
+        on_output_line=tracker.handle_line,
+        on_search_variants=follow,
+    )
+    assert report.downloaded == [TRACK, accented]
+    assert report.failed == [missing]
+    assert followed_queries == [["Skone - L'arret sur image"], ["Skone - arret sur image"]]
+    assert report.relaxed_matches[accented].query == "Skone - arret sur image"
+    assert Path(report.saved_files[accented]).is_file()
+    progress = {entry.track: entry for entry in tracker.snapshot()}
+    assert progress[accented].status == STATUS_DOWNLOADED
+    assert progress[accented].relaxed_query == "Skone - arret sur image"
+    assert progress[TRACK].relaxed_query == ""
+    assert progress[missing].status == STATUS_FAILED
+    messages = [message for message, _ in notifications]
+    assert any('Sköne - L\'arrêt sur image  ->  searching "Skone - arret sur image"' in message for message in messages)
+    found_message = next(message for message in messages if message.startswith("Found by searching"))
+    assert 'Found by searching "Skone - arret sur image": Sköne - L\'arrêt sur image  ->  ' in found_message
+    assert "Check that it is the right track." in found_message
+
+    second_report = run_download(settings, tracks, "relaxed", notify, lambda question: True)
+    assert second_report.already_downloaded == [TRACK, accented]
+    assert second_report.downloaded == []
+
+
+def test_no_further_search_once_the_download_was_stopped(tmp_path, recording_downloader, monkeypatch):
+    """
+    Tracks left over by a download that was stopped are not searched again under other spellings.
+    """
+
+    class StoppedDownloader(recording_downloader):
+        """
+        A downloader whose exact search is stopped early and finds nothing.
+
+        :param settings: User settings
+        """
+
+        def download(self, tracks, name, keep_running=None, on_output_line=None) -> DownloadReport:
+            """
+            Report every track as failed in a run that was stopped.
+
+            :param tracks: Tracks to download
+            :param name: Name of the batch
+            :param keep_running: Unused
+            :param on_output_line: Unused
+            :returns: A stopped report without any download
+            """
+            return DownloadReport(failed=list(tracks), stopped_early=True)
+
+        def download_variants(self, variants, name, keep_running=None, on_output_line=None):
+            """
+            Fail the test: no further search may run.
+
+            :param variants: Unused
+            :param name: Unused
+            :param keep_running: Unused
+            :param on_output_line: Unused
+            """
+            pytest.fail("no further search may run after a stop")
+
+    monkeypatch.setattr(workflow, "SockseekDownloader", StoppedDownloader)
+    accented = Track(artists=("Sköne",), title="L'arrêt sur image")
+    report = run_download(
+        make_settings(tmp_path, VPN_MODE_NONE), [accented], "list", lambda message, level: None, lambda question: True
+    )
+    assert report.failed == [accented] and report.stopped_early

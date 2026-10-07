@@ -24,10 +24,12 @@ What a download does, in order:
    Other VPN choices are described under [VPN](#vpn).
 2. **sockseek downloads** the tracks. Only the first artist of a track is searched for (a Soulseek search needs
    every word to match a file path); the others appear in the notes column.
-3. **The VPN is disconnected again**, unless it was already on before the run.
-4. **Other formats are converted to MP3**: when a track only exists as FLAC, WAV, AIFF, M4A, OGG, Opus or another
+3. **Tracks that were not found are searched again under simpler spellings** (see
+   [When a track is not found](#when-a-track-is-not-found)).
+4. **The VPN is disconnected again**, unless it was already on before the run.
+5. **Other formats are converted to MP3**: when a track only exists as FLAC, WAV, AIFF, M4A, OGG, Opus or another
    format, it is converted to 320 kbps MP3 with its tags and cover art, and the original is deleted.
-5. **The result is listed**: each downloaded track with the file it was saved as, then what was not found.
+6. **The result is listed**: each downloaded track with the file it was saved as, then what was not found.
 
 Good to know:
 
@@ -41,6 +43,30 @@ Good to know:
   so a track is fetched once even if you later move the file off the USB key. Tracks that failed are retried on the
   next run.
 - Soulseek limits searches to about 34 every 220 seconds, so a 200 track playlist takes at least 20 minutes.
+
+## When a track is not found
+
+A Soulseek search only returns files whose path holds every searched word, spelled the same way. A file named
+`arret_sur_image.mp3` is not found by searching `L'arrêt sur image`. So the tracks that were not found are searched
+again, in up to four rounds, each one looser than the last:
+
+| Round | What changes | `Sköne - L'arrêt sur image (Original Mix)` becomes |
+| --- | --- | --- |
+| 1 | Accents removed | `Skone - L'arret sur image (Original Mix)` |
+| 2 | Elided articles (`l'`, `d'`...) and punctuation removed | `Skone - arret sur image Original Mix` |
+| 3 | Decorations removed: `(Original Mix)`, `feat. X`, remaster notes | `Skone - arret sur image` |
+| 4 | Title alone, without the artist | `arret sur image` |
+
+Remix and edit names are never removed, since they name another recording. The title is only searched alone when
+the length of the track is known or the title has at least three words.
+
+A looser search can return another recording than the one you wanted, so a track found this way is shown as
+**Downloaded - check** in amber, with the search that found it. When the length of the track is known (Spotify
+gives it), the file must still be within 3 seconds of it. The download history records the track under its real
+name, so it is not downloaded again.
+
+Each round costs one search per missing track. Switch the rounds off with the "Search tracks that are not found
+again under simpler spellings" setting.
 
 ## When something goes wrong
 
