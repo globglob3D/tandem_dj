@@ -414,6 +414,11 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
   the separator is a name and is kept (`[KRTM] - Track`, `Artist - [untitled]`). `_MUSICAL_DETAIL` matches whole
   words, so `[Dubstep]`, `[Mixmag]` and `[Limited Edition]` go; a label whose name holds such a word
   (`[Live From Earth]`) stays.
+- **`Artist : Title` and `Artist / Title` split a title that holds no dash and no `|`**, only with a space on
+  both sides (`AC/DC`, `24/7` and `Mission: Impossible` stay whole). Without the split the uploader is taken as
+  an unsure artist and the whole text as the title, which never gets the search by title alone; with it,
+  `Cherry Moon trax 1 : The house of house` ends up searched as `The house of house`. A wrong split still searches
+  every word of the title, only without the name of the uploader. Not measured against sockseek.
 - **A YouTube video link that names a playlist** (`watch?v=<video>&list=<playlist>`) is read through the page of
   the playlist (`playlist_link()` builds `playlist?list=<playlist>`). Asked for the video link, yt-dlp reads the
   page of the video and takes the playlist from its side panel; when YouTube serves that page without the panel,

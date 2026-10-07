@@ -88,8 +88,15 @@ def test_strip_noise_drops_the_label_next_to_a_name_written_in_brackets():
         ("Artist - Title - Remix", ("Artist", "Title - Remix")),
         ('Love Ghost x Sofia Thompson- "Fragrance"', ("Love Ghost x Sofia Thompson", "Fragrance")),
         ("Passenger | Let Her Go", ("Passenger", "Let Her Go")),
+        ("Cherry Moon Trax : The House Of House", ("Cherry Moon Trax", "The House Of House")),
+        ("Cherry Moon Trax / The House Of House", ("Cherry Moon Trax", "The House Of House")),
+        ("Artist - Side One / Side Two", ("Artist", "Side One / Side Two")),
+        ("Artist - Chapter : One", ("Artist", "Chapter : One")),
         ("Just A Title", None),
         ("Kiss-O-Matic", None),
+        ("AC/DC", None),
+        ("Mission: Impossible", None),
+        ("24/7", None),
     ],
 )
 def test_split_artist_and_title(text, expected):
@@ -132,6 +139,13 @@ def test_split_artist_and_title(text, expected):
         ("Naive Response", "Daniel Avery", ("Daniel Avery",), (("Daniel Avery",), "Naive Response", False)),
         ("Clouds - Infinity x2 [URAF01]", "Some Label", (), (("Clouds",), "Infinity x2", False)),
         ("Sunrazzle [URAF01]", "Detachment 1", ("Detachment 1",), (("Detachment 1",), "Sunrazzle", False)),
+        (
+            "Cherry Moon trax 1 : The house of house",
+            "Ced The Digger",
+            (),
+            (("Cherry Moon trax 1",), "The house of house", False),
+        ),
+        ("Side One / Side Two", "Some Artist", ("Some Artist",), (("Some Artist",), "Side One / Side Two", False)),
     ],
 )
 def test_parse_upload_title(raw_title, uploader, known_artists, expected):

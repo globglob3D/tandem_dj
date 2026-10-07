@@ -20,7 +20,7 @@ _MUSICAL_DETAIL = re.compile(
 _LEADING_LABEL = re.compile(r"^(premiere|exclusive|free\s*(download|dl))\s*[:|\-–—]\s*", re.IGNORECASE)
 _TRAILING_SEGMENT = re.compile(r"\s*[|•]\s*([^|•]*)$")
 _LEADING_TRACK_NUMBER = re.compile(r"^(\d{1,2}\.\s*|0\d\s*[-.)]\s*)(?=\D)")
-_SEPARATORS = (r"\s+[-–—]\s+", r"\s*[–—]\s*", r"-\s+|\s+-", r"\s+\|\s+")
+_SEPARATORS = (r"\s+[-–—]\s+", r"\s*[–—]\s*", r"-\s+|\s+-", r"\s+\|\s+", r"\s+:\s+", r"\s+/\s+")
 _SEPARATOR_CHARACTERS = "-–—|:/"
 _QUOTE_PAIRS = {'"': '"', "'": "'", "“": "”", "‘": "’", "«": "»"}
 _UPLOADER_SUFFIX = re.compile(r"(\s*-\s*topic|\s*vevo|\s+official)$", re.IGNORECASE)
@@ -62,7 +62,8 @@ def split_artist_and_title(text: str) -> tuple[str, str] | None:
     Split text of the form ``Artist - Title`` on its first separator.
 
     A hyphen inside a word, as in ``a-ha``, is not treated as a separator. ``Artist | Title`` is accepted when the
-    text holds no dash.
+    text holds no dash, then ``Artist : Title`` and ``Artist / Title``, each with a space on both sides, so that
+    ``AC/DC`` and ``Mission: Impossible`` stay whole.
 
     :param text: Text that may contain an artist and a title
     :returns: ``(artist, title)``, or ``None`` when the text holds no separator
