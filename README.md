@@ -104,6 +104,11 @@ Good to know:
 - 320 kbps MP3 is preferred; anything else is only a fallback. A file must be within 3 seconds of the expected
   length, which keeps the right version of a track.
 - sockseek shares no files, so nothing is ever uploaded from this computer.
+- Stopping a download midway is safe: finished tracks stay recorded, the next run picks up the rest, and the
+  partial files sockseek leaves in `.sockseek-staging` inside the output folder are deleted after every run.
+- When no MP3 or lossless file exists for a track, sockseek may fall back to another format such as `.m4a` or
+  `.opus`. Those are kept as downloaded. To refuse them, add `"--format", "mp3,flac,wav,aiff"` to
+  `extra_arguments` in the `[sockseek]` settings.
 - **Re-running the same command only downloads what is new.** Every outcome is recorded in
   `data\sockseek_index.csv`, so a track is fetched once even if you later move the file off the USB key. Tracks that
   failed are retried on the next run.
