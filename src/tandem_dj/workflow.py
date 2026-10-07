@@ -1,5 +1,5 @@
 """
-The download procedure shared by the command line and the window: VPN, sockseek, then conversion.
+The download procedure: VPN, sockseek, then conversion.
 """
 
 from collections.abc import Callable, Sequence
@@ -34,7 +34,7 @@ def run_download(
     :param tracks: Tracks to download
     :param name: Name of the batch, such as a playlist title
     :param notify: Receiver of progress messages, called with the message and one of the ``LEVEL_`` constants
-    :param on_output_line: Receiver of every line sockseek prints; without it sockseek prints to the terminal
+    :param on_output_line: Receiver of every line sockseek prints; without it sockseek prints to the console
     :param keep_running: Extra condition checked every few seconds; sockseek is stopped once it returns ``False``
     :returns: The outcome of every requested track, with converted file names
     :raises DownloadError: If sockseek or the output folder is not available

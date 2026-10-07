@@ -1,8 +1,7 @@
 """
-Entry point for ``python -m tandem_dj``.
+Lets ``python -m tandem_dj`` open the window.
 """
 
-from tandem_dj.cli import main
+from tandem_dj.ui import run
 
-if __name__ == "__main__":
-    main()
+run()
