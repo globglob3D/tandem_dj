@@ -14,6 +14,7 @@ from tandem_dj.paths import (
     default_piactl_executable,
     user_data_directory,
 )
+from tandem_dj.vpn import VPN_MODE_PIA, VPN_MODES
 
 DEFAULT_NAME_FORMAT = "{artist( - )title|slsk-filename}"
 DEFAULT_INDEX_PATH = "data/sockseek_index.csv"
@@ -33,7 +34,7 @@ class Settings:
     :param sockseek_executable: Path of the sockseek program
     :param index_path: Path of the download history kept by sockseek
     :param extra_arguments: Extra sockseek flags appended to every run
-    :param vpn_required: Whether downloads may only run while the VPN is connected
+    :param vpn_mode: How downloads are protected, one of the ``VPN_MODE_`` constants of :mod:`tandem_dj.vpn`
     :param piactl_executable: Path of the Private Internet Access command line tool
     :param convert_to_mp3: Whether downloads in another format are converted to MP3
     :param mp3_bitrate: Bitrate, in kbps, of converted MP3 files
@@ -50,7 +51,7 @@ class Settings:
     sockseek_executable: Path
     index_path: Path
     extra_arguments: tuple[str, ...]
-    vpn_required: bool = True
+    vpn_mode: str = VPN_MODE_PIA
     piactl_executable: Path = field(default_factory=default_piactl_executable)
     convert_to_mp3: bool = True
     mp3_bitrate: int = 320
@@ -94,7 +95,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
         sockseek_executable=_resolve_path(sockseek["executable"]) if sockseek.get("executable") else bundled_sockseek(),
         index_path=_resolve_path(sockseek.get("index_path", DEFAULT_INDEX_PATH)),
         extra_arguments=tuple(str(argument) for argument in sockseek.get("extra_arguments", ())),
-        vpn_required=bool(vpn.get("required", True)),
+        vpn_mode=vpn["mode"] if vpn.get("mode") in VPN_MODES else VPN_MODE_PIA,
         piactl_executable=_resolve_path(vpn["piactl"]) if vpn.get("piactl") else default_piactl_executable(),
         convert_to_mp3=bool(conversion.get("to_mp3", True)),
         mp3_bitrate=int(conversion.get("mp3_bitrate", 320)),
@@ -143,7 +144,7 @@ def save_settings(settings: Settings, config_path: Path | None = None) -> Path:
             sockseek_executable=_quote("" if sockseek_is_bundled else _portable_path(settings.sockseek_executable)),
             index_path=_quote(_portable_path(settings.index_path)),
             extra_arguments=_quote_list(settings.extra_arguments),
-            vpn_required=_boolean(settings.vpn_required),
+            vpn_mode=_quote(settings.vpn_mode),
             piactl_executable=_quote(_portable_path(settings.piactl_executable)),
             convert_to_mp3=_boolean(settings.convert_to_mp3),
             mp3_bitrate=settings.mp3_bitrate,
@@ -245,9 +246,15 @@ index_path = {index_path}
 extra_arguments = {extra_arguments}
 
 [vpn]
-# When true, downloads only run through the Private Internet Access VPN: it is connected before sockseek starts,
-# the download is stopped if the VPN drops, and the VPN is disconnected afterwards (unless it was already on).
-required = {vpn_required}
+# How downloads are protected:
+#   "pia"     Private Internet Access is connected before sockseek starts, the download is stopped if it drops,
+#             and it is disconnected afterwards (unless it was already on).
+#   "manual"  You connect another VPN yourself. Before each download the address the internet sees is shown for
+#             you to approve, and the download is stopped if that address changes.
+#   "none"    No VPN: Soulseek users see your real address. A warning asks for confirmation before each download.
+mode = {vpn_mode}
+
+# Path of the command line tool installed with Private Internet Access.
 piactl = {piactl_executable}
 
 [conversion]

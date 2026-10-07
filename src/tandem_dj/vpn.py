@@ -1,13 +1,24 @@
 """
-Private Internet Access VPN control, through its ``piactl`` command line tool.
+Protection of downloads by a VPN.
+
+Three modes exist. With Private Internet Access, :class:`VpnGuard` connects and disconnects the VPN itself through
+its ``piactl`` command line tool. With another VPN, which the user connects, :class:`AddressWatch` makes sure the
+address the internet sees stays the one the user approved. Without a VPN nothing is checked.
 """
 
 import subprocess
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 
 import httpx
+
+VPN_MODE_PIA = "pia"
+VPN_MODE_MANUAL = "manual"
+VPN_MODE_NONE = "none"
+VPN_MODES = (VPN_MODE_PIA, VPN_MODE_MANUAL, VPN_MODE_NONE)
 
 CONNECTED_STATE = "Connected"
 DISCONNECTED_STATE = "Disconnected"
@@ -18,6 +29,9 @@ POLL_INTERVAL_SECONDS = 1
 COMMAND_TIMEOUT_SECONDS = 30
 ADDRESS_LOOKUP_TIMEOUT_SECONDS = 5
 ADDRESS_LOOKUP_URLS = ("https://api.ipify.org", "https://icanhazip.com")
+LOCATION_LOOKUP_URL = "https://ipinfo.io/json"
+ADDRESS_WATCH_INTERVAL_SECONDS = 20
+ADDRESS_WATCH_TOLERATED_FAILURES = 2
 
 
 class VpnGuard:
@@ -163,14 +177,7 @@ class VpnGuard:
 
         :returns: The address, or an empty string when no service answers
         """
-        for url in ADDRESS_LOOKUP_URLS:
-            try:
-                response = httpx.get(url, timeout=ADDRESS_LOOKUP_TIMEOUT_SECONDS)
-            except httpx.HTTPError:
-                continue
-            if response.status_code == 200 and response.text.strip():
-                return response.text.strip()
-        return ""
+        return lookup_visible_address()
 
     def _disconnect_if_connected_by_guard(self) -> None:
         """
@@ -214,6 +221,128 @@ class VpnGuard:
             check=False,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
+
+
+class AddressWatch:
+    """
+    Watches that the address the internet sees stays the one a download was approved with.
+
+    This is the protection left when the user connects a VPN the application cannot control: if that VPN drops,
+    the visible address changes, or stops being readable when its kill switch cuts the connection.
+
+    :param approved_address: Address the internet saw when the user approved the download
+    :param lookup: Function returning the address the internet currently sees, empty when it cannot be read
+    :param clock: Function returning a time in seconds that only moves forward
+    """
+
+    def __init__(
+        self,
+        approved_address: str,
+        lookup: Callable[[], str] | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.approved_address = approved_address
+        self.latest_address = approved_address
+        self.failed_lookup_count = 0
+        self._lookup = lookup or lookup_visible_address
+        self._clock = clock
+        self._checked_at = clock()
+
+    def is_unchanged(self) -> bool:
+        """
+        Tell whether downloading may go on. Looks the address up at most once per watch interval.
+
+        :returns: ``False`` once the visible address differs from the approved one, or could not be read several
+            times in a row
+        """
+        if self.has_changed or self.is_unreadable:
+            return False
+        if self._clock() - self._checked_at < ADDRESS_WATCH_INTERVAL_SECONDS:
+            return True
+        self._checked_at = self._clock()
+        address = self._lookup()
+        if address:
+            self.latest_address, self.failed_lookup_count = address, 0
+        else:
+            self.failed_lookup_count += 1
+        return not (self.has_changed or self.is_unreadable)
+
+    @property
+    def has_changed(self) -> bool:
+        """
+        Tell whether the internet was seen using another address than the approved one.
+
+        :returns: ``True`` after a lookup returned a different address
+        """
+        return self.latest_address != self.approved_address
+
+    @property
+    def is_unreadable(self) -> bool:
+        """
+        Tell whether the visible address could not be read for too long to keep trusting it.
+
+        :returns: ``True`` after more failed lookups in a row than tolerated
+        """
+        return self.failed_lookup_count > ADDRESS_WATCH_TOLERATED_FAILURES
+
+
+@dataclass(frozen=True)
+class VisibleLocation:
+    """
+    How this computer appears on the internet.
+
+    :param address: IP address the internet sees
+    :param place: City and country that address is registered in, empty when unknown
+    :param provider: Network operator owning that address, empty when unknown
+    """
+
+    address: str
+    place: str = ""
+    provider: str = ""
+
+    def describe(self) -> str:
+        """
+        Put the location in words a user can compare with where they really are.
+
+        :returns: The address, followed by the place and provider when they are known
+        """
+        details = ", ".join(detail for detail in (self.place, self.provider) if detail)
+        return f"{self.address} ({details})" if details else self.address
+
+
+def lookup_visible_location() -> VisibleLocation | None:
+    """
+    Ask outside services how this computer appears on the internet.
+
+    :returns: The visible address, with its place and provider when the service describing them answers; ``None``
+        when no service answers at all
+    """
+    try:
+        response = httpx.get(LOCATION_LOOKUP_URL, timeout=ADDRESS_LOOKUP_TIMEOUT_SECONDS)
+        description = response.json() if response.status_code == 200 else {}
+    except (httpx.HTTPError, ValueError):
+        description = {}
+    if isinstance(description, dict) and description.get("ip"):
+        place = ", ".join(str(description[key]) for key in ("city", "country") if description.get(key))
+        return VisibleLocation(str(description["ip"]), place, str(description.get("org") or ""))
+    address = lookup_visible_address()
+    return VisibleLocation(address) if address else None
+
+
+def lookup_visible_address() -> str:
+    """
+    Ask an outside service which address this computer appears to have.
+
+    :returns: The address, or an empty string when no service answers
+    """
+    for url in ADDRESS_LOOKUP_URLS:
+        try:
+            response = httpx.get(url, timeout=ADDRESS_LOOKUP_TIMEOUT_SECONDS)
+        except httpx.HTTPError:
+            continue
+        if response.status_code == 200 and response.text.strip():
+            return response.text.strip()
+    return ""
 
 
 class VpnError(Exception):

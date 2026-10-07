@@ -39,8 +39,15 @@ from tandem_dj.text_cleaning import track_key
 from tandem_dj.ui import theme
 from tandem_dj.ui.settings_dialog import SettingsDialog
 from tandem_dj.ui.theme import STATUS_NOT_FINISHED
-from tandem_dj.vpn import VpnError, VpnGuard
-from tandem_dj.workflow import LEVEL_ERROR, LEVEL_INFORMATION, LEVEL_SUCCESS, LEVEL_WARNING, run_download
+from tandem_dj.vpn import VPN_MODE_MANUAL, VPN_MODE_NONE, VpnError, VpnGuard
+from tandem_dj.workflow import (
+    LEVEL_ERROR,
+    LEVEL_INFORMATION,
+    LEVEL_SUCCESS,
+    LEVEL_WARNING,
+    DownloadCancelled,
+    run_download,
+)
 
 WINDOW_TITLE = APPLICATION_NAME
 WINDOW_SIZE = "1400x800"
@@ -222,11 +229,17 @@ class MainWindow(tkinter.Tk):
 
     def _show_vpn_state(self) -> None:
         """
-        Show whether the VPN is required and its current state.
+        Show how downloads are protected and, for Private Internet Access, its current state.
         """
-        if not self.settings.vpn_required:
+        if self.settings.vpn_mode == VPN_MODE_NONE:
             self.vpn_label.configure(
-                text="VPN: not required by the settings", foreground=theme.LEVEL_COLORS[LEVEL_WARNING]
+                text="VPN: none - downloads show your real IP address (see Settings)",
+                foreground=theme.LEVEL_COLORS[LEVEL_WARNING],
+            )
+        elif self.settings.vpn_mode == VPN_MODE_MANUAL:
+            self.vpn_label.configure(
+                text="VPN: connected by you - the address the internet sees is shown before each download",
+                foreground=theme.TEXT_DIM,
             )
         elif not self.settings.piactl_executable.is_file():
             self.vpn_label.configure(
@@ -328,6 +341,8 @@ class MainWindow(tkinter.Tk):
                 self._read(pasted_text, settings)
             if download_afterwards and self.requested_tracks:
                 self._download(settings)
+        except DownloadCancelled:
+            self._log("Download cancelled: nothing was downloaded.", LEVEL_WARNING)
         except (SourceError, DownloadError, VpnError) as error:
             self._log(f"Error: {error}", LEVEL_ERROR)
             self.messages.put(("error", str(error)))
@@ -377,7 +392,8 @@ class MainWindow(tkinter.Tk):
 
         :param settings: Settings in use
         :raises DownloadError: If sockseek or the output folder is not available
-        :raises VpnError: If the VPN is required and cannot be connected or confirmed
+        :raises VpnError: If the VPN cannot be connected or confirmed
+        :raises DownloadCancelled: If the user answered no to the question asked before the download
         """
         tracker = ProgressTracker(self.requested_tracks)
         self.messages.put(("tracker", tracker))
@@ -402,10 +418,25 @@ class MainWindow(tkinter.Tk):
             self.requested_tracks,
             self.collection_name,
             notify=self._log,
+            confirm=self._confirm,
             on_output_line=handle_output_line,
             keep_running=lambda: not self.stop_requested.is_set(),
         )
         self.messages.put(("finished", report))
+
+    def _confirm(self, question: str) -> bool:
+        """
+        Ask the user a yes or no question in a warning box and wait for the answer. Called from the worker thread.
+
+        :param question: Question to ask
+        :returns: ``True`` when the user answered yes
+        """
+        write_log(f"Question asked: {' '.join(question.split())}")
+        answer = _Answer()
+        self.messages.put(("confirm", question, answer))
+        answer.given.wait()
+        write_log(f"Answer: {'yes' if answer.is_yes else 'no'}")
+        return answer.is_yes
 
     def _log(self, message: str, level: str = LEVEL_INFORMATION) -> None:
         """
@@ -467,6 +498,14 @@ class MainWindow(tkinter.Tk):
             self._show_report(message[1])
         elif kind == "error":
             messagebox.showerror(WINDOW_TITLE, message[1], parent=self)
+        elif kind == "confirm":
+            answer = message[2]
+            try:
+                answer.is_yes = bool(
+                    messagebox.askyesno(WINDOW_TITLE, message[1], icon="warning", default="no", parent=self)
+                )
+            finally:
+                answer.given.set()
         elif kind == "idle":
             self._set_busy(False)
             self._show_vpn_state()
@@ -627,6 +666,16 @@ class MainWindow(tkinter.Tk):
         self.download_button.configure(state=idle_state)
         self.settings_button.configure(state=idle_state)
         self.stop_button.configure(state="normal" if is_busy and downloading else "disabled")
+
+
+class _Answer:
+    """
+    The answer to a question the worker thread asked the user, filled in by the window thread.
+    """
+
+    def __init__(self) -> None:
+        self.is_yes = False
+        self.given = threading.Event()
 
 
 def _row_identifier(track: Track) -> str:

@@ -36,7 +36,7 @@ src/tandem_dj/
   models.py          Track, TrackCollection
   text_cleaning.py   upload title cleaning and "Artist - Title" splitting (shared by YouTube, SoundCloud, text)
   sockseek.py        SockseekDownloader: CSV input file, command line, report from the sockseek index
-  vpn.py             VpnGuard: context manager around Private Internet Access (piactl)
+  vpn.py             VPN modes; VpnGuard (Private Internet Access through piactl), AddressWatch (user's own VPN)
   conversion.py      convert_to_mp3(): any other audio format to MP3 through ffmpeg
   sources/
     __init__.py      read_tracks() / read_track_lines(): the only entry points; WEBSITE_SOURCES registry
@@ -45,7 +45,8 @@ src/tandem_dj/
     youtube.py       yt-dlp flat playlist listing
     soundcloud.py    api-v2.soundcloud.com with the website's public client_id
     text.py          parse_track_line() for hand-written lines
-tests/               pytest; no network access; conftest.py points the user data folder at a temporary folder
+tests/               pytest; no network access (address lookups are replaced); conftest.py points the user data
+                     folder at a temporary folder
 vendor/sockseek/     the sockseek program (untracked, >100 MB), its licence, and restore instructions
 ```
 
@@ -67,7 +68,17 @@ macOS. It holds `config.toml` (with the Soulseek password), `data/sockseek_index
 4. After the VPN is off again, files among `report.saved_files` that are not MP3 are converted to MP3.
 
 Steps 3 and 4 are `workflow.run_download()`. It reports through a `notify(message, level)` callback, which the
-window sends to its log pane and to the log file.
+window sends to its log pane and to the log file, and asks the user through a `confirm(question)` callback.
+
+Step 3 depends on `Settings.vpn_mode`:
+
+- `pia` (default, also when the setting is missing or unknown): the `VpnGuard` described above.
+- `manual`: the user connects another VPN. `lookup_visible_location()` reads the address, city and provider the
+  internet sees, `confirm` shows them for approval, and an `AddressWatch` stops sockseek when that address changes
+  or cannot be read three times in a row (a kill switch cutting the connection looks like that).
+- `none`: `confirm` shows a warning naming the visible address before every download.
+
+A "no" raises `DownloadCancelled`, which the window logs without an error box.
 
 ### The window
 
@@ -80,10 +91,12 @@ window sends to its log pane and to the log file.
   the pane, such as the full list of tracks sent.
 - Closing the window during a download stops sockseek first and waits for the worker, so the VPN guard always
   gets to disconnect.
+- The worker asks the user a question with `_confirm()`: it queues a `confirm` message holding an `_Answer` and
+  waits on its event while the window thread shows the box (warning icon, No as the default button).
 - Looks live in `ui/theme.py` only (ttk `clam` theme recoloured; plain `tkinter.Text` widgets need
   `style_text_box()`). The user wants it dark, without decorative animations.
 - To check the window by eye, drive `MainWindow` against a temporary settings file with
-  `extra_arguments = ("--mock-files-dir", <folder>, "--mock-files-slow")` and `vpn_required = False`.
+  `extra_arguments = ("--mock-files-dir", <folder>, "--mock-files-slow")` and `vpn_mode = "none"`.
 - `tests/test_ui.py` shares one hidden window per module: starting Tk several times in a process fails at random.
 
 ### Logs and debugging
@@ -100,7 +113,9 @@ window sends to its log pane and to the log file.
 ## Standing requirements from the user
 
 - **Never contact the Soulseek network outside the VPN guard**, including while testing. Use sockseek's offline
-  mock mode for tests. `[vpn] required` defaults to `true` even when the section is missing.
+  mock mode for tests. `[vpn] mode` defaults to `pia` even when the section is missing. Friends without Private
+  Internet Access choose another mode themselves; the author's own setup stays on `pia`.
+- **Downloading without a VPN must never be silent**: the warning box appears before every such download.
 - **Show what is really used**: the exact artist and title sent to sockseek, and the file each track was saved as.
   Keep the window and the log informative when adding features.
 - **MP3 is the wanted format**; every download in another format is converted, lossy ones included.

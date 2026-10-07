@@ -42,7 +42,7 @@ def describe_setup(settings: Settings, config_path: Path | None = None) -> list[
         f">= {settings.preferred_minimum_bitrate} kbps",
         f"File naming: {settings.name_format}",
         f"Extra sockseek flags: {' '.join(settings.extra_arguments) or 'none'}",
-        f"VPN required: {'yes' if settings.vpn_required else 'no'}",
+        f"VPN mode: {settings.vpn_mode}",
         f"VPN client: {settings.piactl_executable} ({vpn_client_state})",
         f"Conversion to MP3: {f'{settings.mp3_bitrate} kbps' if settings.convert_to_mp3 else 'off'}",
     ]

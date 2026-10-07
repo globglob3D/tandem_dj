@@ -159,3 +159,107 @@ def test_missing_vpn_client_is_reported(tmp_path):
     """
     with pytest.raises(VpnError, match="Private Internet Access was not found"), VpnGuard(tmp_path / "piactl.exe"):
         pytest.fail("the block must not run")
+
+
+def test_address_watch_stops_once_another_address_is_seen():
+    """
+    The watch looks the address up once per interval and gives up for good when it differs from the approved one.
+    """
+    now = [0.0]
+    answers = [VPN_ADDRESS, REAL_ADDRESS, VPN_ADDRESS]
+    lookups: list[str] = []
+
+    def lookup() -> str:
+        """
+        Answer like the outside lookup service, one prepared answer per call.
+
+        :returns: The next address
+        """
+        lookups.append(answers[len(lookups)])
+        return lookups[-1]
+
+    watch = vpn.AddressWatch(VPN_ADDRESS, lookup=lookup, clock=lambda: now[0])
+    assert watch.is_unchanged() and lookups == []
+    now[0] += vpn.ADDRESS_WATCH_INTERVAL_SECONDS
+    assert watch.is_unchanged() and len(lookups) == 1
+    now[0] += 1
+    assert watch.is_unchanged() and len(lookups) == 1
+    now[0] += vpn.ADDRESS_WATCH_INTERVAL_SECONDS
+    assert not watch.is_unchanged()
+    assert watch.has_changed and watch.latest_address == REAL_ADDRESS
+    now[0] += vpn.ADDRESS_WATCH_INTERVAL_SECONDS
+    assert not watch.is_unchanged() and len(lookups) == 2
+
+
+def test_address_watch_tolerates_a_few_failed_lookups_only():
+    """
+    A lookup service that stops answering, as behind a kill switch, ends the watch after a few attempts.
+    """
+    now = [0.0]
+    watch = vpn.AddressWatch(VPN_ADDRESS, lookup=lambda: "", clock=lambda: now[0])
+    results = []
+    for _ in range(vpn.ADDRESS_WATCH_TOLERATED_FAILURES + 1):
+        now[0] += vpn.ADDRESS_WATCH_INTERVAL_SECONDS
+        results.append(watch.is_unchanged())
+    assert results == [True] * vpn.ADDRESS_WATCH_TOLERATED_FAILURES + [False]
+    assert watch.is_unreadable and not watch.has_changed
+
+
+def test_visible_location_is_described_with_what_is_known(monkeypatch):
+    """
+    The location shown to the user carries the place and provider when the describing service answers, and falls
+    back to the bare address, then to nothing, when services do not answer.
+    """
+
+    class Response:
+        """
+        A minimal stand-in for an HTTP response.
+
+        :param status_code: HTTP status
+        :param body: Decoded JSON body, or text
+        """
+
+        def __init__(self, status_code: int, body: object) -> None:
+            self.status_code = status_code
+            self.text = body if isinstance(body, str) else ""
+            self._body = body
+
+        def json(self) -> object:
+            """
+            Return the decoded body.
+
+            :returns: The body given at creation
+            """
+            return self._body
+
+    described = {"ip": VPN_ADDRESS, "city": "Amsterdam", "country": "NL", "org": "AS64500 Some VPN"}
+    monkeypatch.setattr(vpn.httpx, "get", lambda url, timeout: Response(200, described))
+    assert vpn.lookup_visible_location().describe() == f"{VPN_ADDRESS} (Amsterdam, NL, AS64500 Some VPN)"
+
+    def only_plain_services_answer(url: str, timeout: float) -> Response:
+        """
+        Fail the describing service and answer the plain address services.
+
+        :param url: Address of the service
+        :param timeout: Unused
+        :returns: A response for the plain address services
+        """
+        if url == vpn.LOCATION_LOOKUP_URL:
+            raise vpn.httpx.ConnectError("unreachable")
+        return Response(200, f"{VPN_ADDRESS}\n")
+
+    monkeypatch.setattr(vpn.httpx, "get", only_plain_services_answer)
+    assert vpn.lookup_visible_location() == vpn.VisibleLocation(VPN_ADDRESS)
+    assert vpn.lookup_visible_location().describe() == VPN_ADDRESS
+
+    def nothing_answers(url: str, timeout: float) -> Response:
+        """
+        Fail every service.
+
+        :param url: Address of the service
+        :param timeout: Unused
+        """
+        raise vpn.httpx.ConnectError("unreachable")
+
+    monkeypatch.setattr(vpn.httpx, "get", nothing_answers)
+    assert vpn.lookup_visible_location() is None

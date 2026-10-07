@@ -85,21 +85,22 @@ def apply_theme(window: tkinter.Misc) -> None:
         bordercolor=[("disabled", SURFACE_RAISED), ("active", TEXT)],
     )
     style.configure("TEntry", fieldbackground=SURFACE, foreground=TEXT_BRIGHT, padding=4)
-    style.configure(
-        "TCheckbutton",
-        background=BACKGROUND,
-        foreground=TEXT,
-        indicatorbackground=SURFACE,
-        indicatorforeground=TEXT_BRIGHT,
-        upperbordercolor=BORDER,
-        lowerbordercolor=BORDER,
-    )
-    style.map(
-        "TCheckbutton",
-        background=[("active", BACKGROUND)],
-        foreground=[("active", TEXT_BRIGHT)],
-        indicatorbackground=[("selected", SELECTION), ("pressed", SELECTION)],
-    )
+    for toggle_style in ("TCheckbutton", "TRadiobutton"):
+        style.configure(
+            toggle_style,
+            background=BACKGROUND,
+            foreground=TEXT,
+            indicatorbackground=SURFACE,
+            indicatorforeground=TEXT_BRIGHT,
+            upperbordercolor=BORDER,
+            lowerbordercolor=BORDER,
+        )
+        style.map(
+            toggle_style,
+            background=[("active", BACKGROUND)],
+            foreground=[("active", TEXT_BRIGHT)],
+            indicatorbackground=[("selected", SELECTION), ("pressed", SELECTION)],
+        )
     style.configure(
         "Treeview", background=SURFACE, fieldbackground=SURFACE, foreground=TEXT, rowheight=ROW_HEIGHT, relief="flat"
     )

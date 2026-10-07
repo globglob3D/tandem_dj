@@ -9,8 +9,14 @@ from tkinter import filedialog, messagebox, ttk
 
 from tandem_dj.config import Settings, save_settings
 from tandem_dj.ui import theme
+from tandem_dj.vpn import VPN_MODE_MANUAL, VPN_MODE_NONE, VPN_MODE_PIA
 
 DIALOG_TITLE = "Tandem DJ settings"
+VPN_MODE_LABELS = {
+    VPN_MODE_PIA: "Private Internet Access: connected for each download and disconnected afterwards, automatically",
+    VPN_MODE_MANUAL: "Another VPN that I connect myself: shows the address the internet sees before each download",
+    VPN_MODE_NONE: "No VPN: Soulseek users see my real IP address (a warning asks before each download)",
+}
 
 
 class SettingsDialog(tkinter.Toplevel):
@@ -42,7 +48,7 @@ class SettingsDialog(tkinter.Toplevel):
         self.preferred_minimum_bitrate = tkinter.StringVar(self, str(settings.preferred_minimum_bitrate))
         self.name_format = tkinter.StringVar(self, settings.name_format)
         self.extra_arguments = tkinter.StringVar(self, " ".join(settings.extra_arguments))
-        self.vpn_required = tkinter.BooleanVar(self, settings.vpn_required)
+        self.vpn_mode = tkinter.StringVar(self, settings.vpn_mode)
         self.piactl_executable = tkinter.StringVar(self, str(settings.piactl_executable))
         self.convert_to_mp3 = tkinter.BooleanVar(self, settings.convert_to_mp3)
         self.mp3_bitrate = tkinter.StringVar(self, str(settings.mp3_bitrate))
@@ -61,11 +67,10 @@ class SettingsDialog(tkinter.Toplevel):
         self._add_entry(form, "Preferred bitrate (kbps)", self.preferred_minimum_bitrate, hint="lower is a fallback")
         self._add_entry(form, "File naming", self.name_format, hint="sockseek --name-format")
         self._add_entry(form, "Extra sockseek flags", self.extra_arguments, hint="space separated, optional")
-        self._add_heading(form, "VPN (Private Internet Access)")
-        self._add_checkbox(
-            form, "Only download while the VPN is connected (turned on and off automatically)", self.vpn_required
-        )
-        self._add_entry(form, "piactl program", self.piactl_executable, browse=self._browse_piactl)
+        self._add_heading(form, "VPN")
+        for mode, label in VPN_MODE_LABELS.items():
+            self._add_choice(form, label, self.vpn_mode, mode)
+        self._add_entry(form, "PIA piactl program", self.piactl_executable, browse=self._browse_piactl)
         self._add_heading(form, "Conversion")
         self._add_checkbox(
             form, "Convert downloads in any other format to MP3 and delete the original", self.convert_to_mp3
@@ -135,6 +140,20 @@ class SettingsDialog(tkinter.Toplevel):
         )
         self.next_row += 1
 
+    def _add_choice(self, form: ttk.Frame, label: str, variable: tkinter.StringVar, value: str) -> None:
+        """
+        Add one option of a group of mutually exclusive choices, spanning the form.
+
+        :param form: Frame holding the form
+        :param label: Text of the option
+        :param variable: Variable shared by the group, holding the value of the selected option
+        :param value: Value of this option
+        """
+        ttk.Radiobutton(form, text=label, variable=variable, value=value).grid(
+            row=self.next_row, column=0, columnspan=3, sticky="w", pady=2
+        )
+        self.next_row += 1
+
     def _browse_output_directory(self) -> None:
         """
         Let the user pick the download folder.
@@ -189,7 +208,7 @@ class SettingsDialog(tkinter.Toplevel):
             preferred_minimum_bitrate=preferred_minimum_bitrate,
             name_format=self.name_format.get().strip() or self.settings.name_format,
             extra_arguments=tuple(self.extra_arguments.get().split()),
-            vpn_required=self.vpn_required.get(),
+            vpn_mode=self.vpn_mode.get(),
             piactl_executable=Path(self.piactl_executable.get().strip()),
             convert_to_mp3=self.convert_to_mp3.get(),
             mp3_bitrate=mp3_bitrate,

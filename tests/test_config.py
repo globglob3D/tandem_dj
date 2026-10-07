@@ -8,6 +8,7 @@ import pytest
 
 from tandem_dj.config import ConfigurationError, default_settings, load_settings, save_settings
 from tandem_dj.paths import bundled_sockseek, default_piactl_executable, user_data_directory
+from tandem_dj.vpn import VPN_MODE_MANUAL, VPN_MODE_NONE, VPN_MODE_PIA
 
 MINIMAL_SETTINGS = '[soulseek]\nusername = "tester"\npassword = "secret"\n[download]\noutput_directory = "D:/music"\n'
 
@@ -23,7 +24,7 @@ def test_settings_survive_a_save_and_load(tmp_path):
         output_directory=tmp_path / "music folder",
         preferred_formats=("flac", "mp3"),
         extra_arguments=("--fast-search", "--search-timeout", "8000"),
-        vpn_required=False,
+        vpn_mode=VPN_MODE_MANUAL,
         mp3_bitrate=256,
         ffmpeg_executable="my-ffmpeg",
     )
@@ -31,13 +32,18 @@ def test_settings_survive_a_save_and_load(tmp_path):
     assert load_settings(path) == settings
 
 
-def test_vpn_is_required_unless_the_settings_say_otherwise(tmp_path):
+def test_downloads_go_through_the_vpn_unless_the_settings_clearly_say_otherwise(tmp_path):
     """
-    A settings file without a VPN section still makes downloads go through the VPN.
+    A settings file without a VPN section, or with a mode that does not exist, makes downloads go through Private
+    Internet Access; only a known mode switches that off.
     """
     path = tmp_path / "config.toml"
     path.write_text(MINIMAL_SETTINGS, encoding="utf-8")
-    assert load_settings(path).vpn_required is True
+    assert load_settings(path).vpn_mode == VPN_MODE_PIA
+    path.write_text(MINIMAL_SETTINGS + '[vpn]\nmode = "off"\n', encoding="utf-8")
+    assert load_settings(path).vpn_mode == VPN_MODE_PIA
+    path.write_text(MINIMAL_SETTINGS + '[vpn]\nmode = "none"\n', encoding="utf-8")
+    assert load_settings(path).vpn_mode == VPN_MODE_NONE
 
 
 def test_shipped_programs_and_user_data_folder_are_the_defaults(tmp_path):

@@ -21,6 +21,7 @@ What a download does, in order:
 
 1. **The VPN is connected** (Private Internet Access). The download only starts once an outside service confirms
    that the internet no longer sees your real address. If the VPN drops, sockseek is stopped within seconds.
+   Other VPN choices are described under [VPN](#vpn).
 2. **sockseek downloads** the tracks. Only the first artist of a track is searched for (a Soulseek search needs
    every word to match a file path); the others appear in the notes column.
 3. **The VPN is disconnected again**, unless it was already on before the run.
@@ -70,11 +71,20 @@ Settings worth knowing, all in the **Settings...** dialog:
 
 - **Extra sockseek flags** are passed to every run: any flag from `sockseek --help`, for example `--fast-search`
   or `--desperate`.
-- **VPN**: when required, every download goes through Private Internet Access (`piactl` is its command line tool,
-  installed with it). You must be logged in to PIA. Keep PIA's own kill switch on "Auto" (its default) as a second
-  line of defence.
+- **VPN**: see [VPN](#vpn) below.
 - **ffmpeg program** and the sockseek program (`[sockseek] executable` in `config.toml`) are empty by default,
   which means the ones shipped with the application.
+
+## VPN
+
+Soulseek is a peer-to-peer network: the people you download from see the IP address you connect with. The
+**Settings...** dialog offers three ways to deal with that:
+
+| Choice | What happens |
+| --- | --- |
+| **Private Internet Access** (default) | The VPN is connected before each download and disconnected afterwards, automatically. The download only starts once an outside service confirms your real address is hidden, and stops within seconds if the VPN drops. You must be logged in to PIA; keep its own kill switch on "Auto" (its default) as a second line of defence. |
+| **Another VPN that I connect myself** | Before each download a box shows the address, city and provider the internet currently sees, and asks whether that is your VPN. If it shows your own city or internet provider, the VPN is off: answer No. During the download the address is checked every 20 seconds, and sockseek is stopped if it changes or can no longer be read. |
+| **No VPN** | A warning box before every download reminds you that your real IP address will be visible, and nothing is downloaded unless you answer Yes. |
 
 ## How the websites are read
 
@@ -93,8 +103,8 @@ Requirements:
 
 - [uv](https://docs.astral.sh/uv/)
 - the sockseek program in `vendor/sockseek/` (see [vendor/sockseek/README.md](vendor/sockseek/README.md))
-- [Private Internet Access](https://www.privateinternetaccess.com/), logged in, unless the VPN is switched off in
-  the settings
+- [Private Internet Access](https://www.privateinternetaccess.com/), logged in, unless another [VPN](#vpn) choice
+  is made in the settings
 
 ffmpeg comes with the Python environment (the `imageio-ffmpeg` package), so nothing else has to be installed.
 
