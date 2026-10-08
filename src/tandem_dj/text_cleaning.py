@@ -5,23 +5,20 @@ Helpers that turn messy upload titles into clean artist and title strings.
 import re
 import unicodedata
 
-_BRACKET_GROUP = re.compile(r"\s*(?P<opening>[(\[{])(?P<content>[^()\[\]{}]*)[)\]}]")
-_PARENTHESIS = "("
+_BRACKET_GROUP = re.compile(r"\s*[(\[{]([^()\[\]{}]*)[)\]}]")
 _NOISE = re.compile(
     r"official|video|audio|lyric|visuali[sz]er|clip officiel|premiere|out now|free\s*(download|dl)"
     r"|full (album|stream)|\b(hd|hq|4k|mv|m/v)\b|^\s*(19|20)\d{2}\s*$",
     re.IGNORECASE,
 )
 _MUSICAL_DETAIL = re.compile(
-    r"mix(e[sd])?\b|\b(edit|cover|flip)s?\b|\bdub(s|plate)?\b|version|bootleg|rework|refix|mash-?up|\bfeat|\bft\b"
-    r"|\blive\b|\bvip\b|remaster|instrumental|acoustic|reprise|\bdemo\b|\b(part|pt)\b",
+    r"mix|edit|version|dub|bootleg|rework|feat|\bft\b|live|vip|flip|remaster|instrumental|acoustic|cover",
     re.IGNORECASE,
 )
 _LEADING_LABEL = re.compile(r"^(premiere|exclusive|free\s*(download|dl))\s*[:|\-–—]\s*", re.IGNORECASE)
 _TRAILING_SEGMENT = re.compile(r"\s*[|•]\s*([^|•]*)$")
 _LEADING_TRACK_NUMBER = re.compile(r"^(\d{1,2}\.\s*|0\d\s*[-.)]\s*)(?=\D)")
 _SEPARATORS = (r"\s+[-–—]\s+", r"\s*[–—]\s*", r"-\s+|\s+-", r"\s+\|\s+", r"\s+:\s+", r"\s+/\s+")
-_SEPARATOR_CHARACTERS = "-–—|:/"
 _QUOTE_PAIRS = {'"': '"', "'": "'", "“": "”", "‘": "’", "«": "»"}
 _UPLOADER_SUFFIX = re.compile(r"(\s*-\s*topic|\s*vevo|\s+official)$", re.IGNORECASE)
 
@@ -38,18 +35,16 @@ def normalize_text(text: str) -> str:
 
 def strip_noise(title: str) -> str:
     """
-    Remove decorations such as ``(Official Video)``, ``[FREE DL]`` or ``[LABEL007]`` that are not part of a song name.
+    Remove decorations such as ``(Official Video)`` or ``[FREE DL]`` that are not part of a song name.
 
-    Bracketed text describing the music itself, such as ``(Extended Mix)`` or ``[Club Edit]``, is kept. Other text
-    in square brackets or braces is dropped: uploads use them for label names, catalogue numbers and genres, which
-    no file name on Soulseek carries. Text in parentheses is only dropped when it is a known decoration, since
-    parentheses often belong to the name of a song. Bare release years and leading track numbers such as ``03.``
-    are dropped.
+    Only known decorations are removed. Any other text in parentheses or brackets is kept, whether it names a
+    version, as ``(Extended Mix)`` does, or a label, as ``[LABEL007]`` does: the first search uses the title as
+    it was written. Bare release years and leading track numbers such as ``03.`` are dropped.
 
     :param title: Upload title as shown on the platform
     :returns: The title without the decorations
     """
-    cleaned = _BRACKET_GROUP.sub(_keep_meaningful_group, normalize_text(title))
+    cleaned = _BRACKET_GROUP.sub(_keep_musical_group, normalize_text(title))
     cleaned = _LEADING_TRACK_NUMBER.sub("", _LEADING_LABEL.sub("", cleaned))
     trailing_segment = _TRAILING_SEGMENT.search(cleaned)
     if trailing_segment and _is_noise(trailing_segment.group(1)):
@@ -158,34 +153,14 @@ def track_key(artist: str, title: str) -> tuple[str, str]:
     return comparison_key(artist), comparison_key(title)
 
 
-def _keep_meaningful_group(match: re.Match[str]) -> str:
+def _keep_musical_group(match: re.Match[str]) -> str:
     """
     Decide what replaces one bracketed group while stripping noise.
 
     :param match: Regular expression match of a bracketed group and its leading whitespace
-    :returns: The group unchanged when it belongs to the name of the song, otherwise an empty string
+    :returns: An empty string when the group is a known decoration, otherwise the group unchanged
     """
-    content = match.group("content")
-    if _MUSICAL_DETAIL.search(content):
-        return match.group(0)
-    if _NOISE.search(content):
-        return ""
-    if match.group("opening") == _PARENTHESIS or _stands_for_a_name(match):
-        return match.group(0)
-    return ""
-
-
-def _stands_for_a_name(match: re.Match[str]) -> bool:
-    """
-    Tell whether a bracketed group is all there is on its side of the title, as in ``[KRTM] - Track``.
-
-    Such a group is the name of the artist or of the song itself, written with brackets.
-
-    :param match: Regular expression match of a bracketed group and its leading whitespace
-    :returns: ``True`` when nothing but a separator, or nothing at all, stands on each side of the group
-    """
-    before, after = match.string[: match.start()].rstrip(), match.string[match.end() :].lstrip()
-    return (not before or before[-1] in _SEPARATOR_CHARACTERS) and (not after or after[0] in _SEPARATOR_CHARACTERS)
+    return "" if _is_noise(match.group(1)) else match.group(0)
 
 
 def _is_noise(text: str) -> bool:
