@@ -531,9 +531,9 @@ columns, whole albums, failures explained in plain words, the setting for silent
 whole playlist behind a YouTube video link. 0.7.0, released on 2026-10-08, made tracks from YouTube easier to
 find: titles written `Artist : Title` or `Artist / Title` are split, the relaxed search drops what titles hold in
 brackets step by step while keeping the word naming a version, and the closest file of a broader search is taken
-for tracks no spelling finds. Since 0.7.0, not released yet: "Show the file in its folder" opens the file manager
-the user made the default on Windows, and Explorer on the right folder otherwise; and the artist is never left
-out of the matching any more, after two songs of other artists were saved for tracks searched by title alone: the
+for tracks no spelling finds. 0.8.0, released on 2026-10-08 as well: "Show the file in its folder" opens the file
+manager the user made the default on Windows, and Explorer on the right folder otherwise; and the artist is never
+left out of the matching any more, after two songs of other artists were saved for tracks searched by title alone: the
 relaxed search has no round without the artist, tracks whose artist is unsure go to sockseek in a run of their
 own, and the closest file must name the whole artist in one part of its path. What is known to work and what
 is not:
