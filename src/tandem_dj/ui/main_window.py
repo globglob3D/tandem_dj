@@ -31,6 +31,7 @@ from tandem_dj.progress import (
     TrackProgress,
     format_seconds,
     format_size,
+    remote_file_name,
 )
 from tandem_dj.sockseek import (
     DownloadError,
@@ -40,6 +41,7 @@ from tandem_dj.sockseek import (
     input_row,
     remove_duplicates,
 )
+from tandem_dj.soulseek_paths import read_soulseek_paths, remember_soulseek_paths, soulseek_path_history_path
 from tandem_dj.source_history import read_tried_sources, remember_tried_sources, source_history_path
 from tandem_dj.sources import SourceError, read_track_lines, read_tracks
 from tandem_dj.text_cleaning import track_key
@@ -66,6 +68,7 @@ PROGRESS_BAR_CELLS = 10
 REFRESH_INTERVAL_MILLISECONDS = 300
 VPN_MESSAGE_PREFIX = "VPN: "
 UNFINISHED_STATUSES = (STATUS_WAITING, STATUS_SEARCHING, STATUS_DOWNLOADING)
+RECEIVING_STATUSES = (STATUS_DOWNLOADING, STATUS_DOWNLOADED)
 FILE_STATUSES = (STATUS_DOWNLOADED, STATUS_FOUND_RELAXED, STATUS_ALBUM, STATUS_ALREADY_DOWNLOADED)
 MENU_DOWNLOAD = "Download"
 MENU_DOWNLOAD_AGAIN = "Download again"
@@ -96,6 +99,7 @@ COLUMNS = (
     ("size", "Received", 130, "e"),
     ("speed", "Speed", 76, "e"),
     ("left", "Time left", 84, "e"),
+    ("soulseek_name", "Name on Soulseek", 200, "w"),
     ("detail", "Details", 300, "w"),
     ("notes", "Notes", 160, "w"),
 )
@@ -132,6 +136,7 @@ class MainWindow(tkinter.Tk):
         self.row_tracks: dict[str, Track] = {}
         self.saved_files: dict[Track, str] = {}
         self.tried_sources: dict[Track, tuple[str, ...]] = {}
+        self.soulseek_paths: dict[Track, str] = {}
         self.rows_before_request: dict[str, tuple[tuple, tuple]] = {}
 
         self.title(WINDOW_TITLE)
@@ -578,6 +583,21 @@ class MainWindow(tkinter.Tk):
         file_path = self._file_of(track)
         return bool(file_path) and Path(file_path).exists()
 
+    def _soulseek_name_of(self, track: Track, status: str, entry: TrackProgress | None) -> str:
+        """
+        Tell what the file of a track is named on Soulseek, where its owner named it: the file being received
+        or just received, otherwise the one an earlier download saved.
+
+        :param track: Track to look up
+        :param status: Status its row displays
+        :param entry: Live progress of the track, when a download is running
+        :returns: The file name, or the name of the shared folder for an album; empty when the track has no
+            file or when the name is not known
+        """
+        if entry is not None and entry.status in RECEIVING_STATUSES:
+            return entry.soulseek_name
+        return remote_file_name(self.soulseek_paths.get(track, "")) if status in FILE_STATUSES else ""
+
     def _may_replace_files(self, tracks: Sequence[Track]) -> bool:
         """
         Ask before downloading again tracks that already have a file, which the new download replaces.
@@ -756,12 +776,15 @@ class MainWindow(tkinter.Tk):
         for track, file_path in already_downloaded.items():
             write_log(f"  {track.display_name}  ->  {file_path}")
         tried_sources = read_tried_sources(source_history_path(settings), unique_tracks)
+        soulseek_paths = read_soulseek_paths(soulseek_path_history_path(settings), list(already_downloaded))
         self.requested_tracks = unique_tracks
         self.collection = collection
         self.read_input = pasted_text
         self.batch_directory = None
         self.control.clear_requests()
-        self.messages.put(("tracks", collection, unique_tracks, duplicate_count, already_downloaded, tried_sources))
+        self.messages.put(
+            ("tracks", collection, unique_tracks, duplicate_count, already_downloaded, tried_sources, soulseek_paths)
+        )
 
     def _download(self, settings: Settings, request: TrackRequest | None = None) -> None:
         """
@@ -940,6 +963,7 @@ class MainWindow(tkinter.Tk):
         duplicate_count: int,
         already_downloaded: Mapping[Track, str],
         tried_sources: Mapping[Track, tuple[str, ...]] | None = None,
+        soulseek_paths: Mapping[Track, str] | None = None,
     ) -> None:
         """
         Fill the table with freshly read tracks, exactly as they will be sent to sockseek.
@@ -949,11 +973,13 @@ class MainWindow(tkinter.Tk):
         :param duplicate_count: Number of parsed tracks left out as duplicates
         :param already_downloaded: File of each track an earlier download saved and that is still there
         :param tried_sources: Soulseek users each track was tried from by earlier downloads
+        :param soulseek_paths: Path the file of each already downloaded track had on Soulseek, when it is known
         """
         self.tracker = None
         self.report = DownloadReport()
         self.saved_files = dict(already_downloaded)
         self.tried_sources = dict(tried_sources or {})
+        self.soulseek_paths = dict(soulseek_paths or {})
         self.rows_before_request.clear()
         self.row_tracks = {_row_identifier(track): track for track in tracks}
         self.table.delete(*self.table.get_children())
@@ -975,6 +1001,7 @@ class MainWindow(tkinter.Tk):
                 "",
                 "",
                 "",
+                self._soulseek_name_of(track, status, None),
                 _describe_existing_file(already_downloaded[track]) if track in already_downloaded else "",
                 "; ".join(notes),
             )
@@ -1058,6 +1085,7 @@ class MainWindow(tkinter.Tk):
         self.table.set(row, "size", _describe_size(entry) if entry is not None else "")
         self.table.set(row, "speed", f"{format_size(entry.speed_bytes_per_second)}/s" if is_downloading else "")
         self.table.set(row, "left", format_seconds(entry.seconds_left) if is_downloading else "")
+        self.table.set(row, "soulseek_name", self._soulseek_name_of(track, status, entry))
         self.table.set(row, "detail", detail or (entry.detail if entry is not None else ""))
         self.table.item(row, tags=(status,))
 
@@ -1072,6 +1100,7 @@ class MainWindow(tkinter.Tk):
         if self.tracker is not None:
             self._show_progress()
         live_entries = self._live_entries()
+        self._keep_outcome(report, live_entries)
         for track in report.downloaded:
             file_name = Path(report.saved_files.get(track, "")).name
             relaxed_match, album = report.relaxed_matches.get(track), report.albums.get(track)
@@ -1098,7 +1127,6 @@ class MainWindow(tkinter.Tk):
             self._show_row(track, STATUS_FAILED, "", None, detail)
         for track in report.not_attempted:
             self._show_row(track, STATUS_NOT_FINISHED, "", None, "right-click to download it, or run Download again")
-        self._keep_outcome(report, live_entries)
         self._sort_rows()
         totals = self.report
         finished_count = len(totals.downloaded) + len(totals.already_downloaded) + len(totals.failed)
@@ -1134,8 +1162,9 @@ class MainWindow(tkinter.Tk):
 
     def _keep_outcome(self, report: DownloadReport, live_entries: Mapping[Track, TrackProgress]) -> None:
         """
-        Remember what a download found out: the outcome and the file of its tracks, and the Soulseek users they
-        were tried from, which are also written down for later launches.
+        Remember what a download found out: the outcome and the file of its tracks, the Soulseek users they
+        were tried from, which are also written down for later launches, and the path each downloaded file had
+        on Soulseek.
 
         :param report: Outcome of the run
         :param live_entries: Live progress of the tracks the run followed
@@ -1152,6 +1181,32 @@ class MainWindow(tkinter.Tk):
             remember_tried_sources(source_history_path(self.settings), new_sources)
         except OSError as error:
             self._log(f"The sources that were tried could not be written down: {error}", LEVEL_WARNING)
+        self._keep_soulseek_paths(report, live_entries)
+
+    def _keep_soulseek_paths(self, report: DownloadReport, live_entries: Mapping[Track, TrackProgress]) -> None:
+        """
+        Remember the path each file a download saved had on Soulseek, in the log file and for later launches. A
+        track whose new file came without such a path is no longer known under the path of its earlier file.
+
+        :param report: Outcome of the run
+        :param live_entries: Live progress of the tracks the run followed
+        """
+        new_paths = {
+            track: live_entries[track].soulseek_path if track in live_entries else "" for track in report.downloaded
+        }
+        known_paths = {track: soulseek_path for track, soulseek_path in new_paths.items() if soulseek_path}
+        for track in new_paths:
+            self.soulseek_paths.pop(track, None)
+        self.soulseek_paths.update(known_paths)
+        if known_paths:
+            write_log("Downloaded files as they were shared on Soulseek (track -> user: path -> saved as):")
+        for track, soulseek_path in known_paths.items():
+            source = (live_entries[track].sources or ("?",))[-1]
+            write_log(f"  {track.display_name}  ->  {source}: {soulseek_path}  ->  {report.saved_files.get(track, '')}")
+        try:
+            remember_soulseek_paths(soulseek_path_history_path(self.settings), new_paths)
+        except OSError as error:
+            self._log(f"The names the files had on Soulseek could not be written down: {error}", LEVEL_WARNING)
 
     def _set_busy(self, is_busy: bool, downloading: bool = False) -> None:
         """

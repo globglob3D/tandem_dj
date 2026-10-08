@@ -35,6 +35,8 @@ src/tandem_dj/
   batch_folder.py    batch_folder_name(): the folder of one download, named after playlist, website and time
   progress.py        ProgressTracker: per-track live state rebuilt from sockseek's JSON progress events
   source_history.py  remember_tried_sources() / read_tried_sources(): who each track was tried from, kept in a file
+  soulseek_paths.py  remember_soulseek_paths() / read_soulseek_paths(): the path each downloaded file had on
+                     Soulseek, kept in a file
   ui/
     main_window.py   MainWindow (tkinter): input box, track table with its right-click menu, summary bar, log pane
     settings_dialog.py  SettingsDialog: edits and saves config.toml
@@ -75,7 +77,7 @@ vendor/sockseek/     the sockseek program (untracked, >100 MB), its licence, and
 Nothing is written inside the repository at run time. Settings, history and logs live in the user data folder
 (`paths.user_data_directory()`): `%APPDATA%\Tandem DJ` on Windows, `~/Library/Application Support/Tandem DJ` on
 macOS. It holds `config.toml` (with the Soulseek password), `data/sockseek_index.csv`, `data/tried_sources.json`,
-`data/inputs/*.csv` and `logs/`. The `TANDEM_DJ_HOME` environment variable replaces that location.
+`data/soulseek_paths.json`, `data/inputs/*.csv` and `logs/`. The `TANDEM_DJ_HOME` environment variable replaces that location.
 
 ## How it fits together
 
@@ -163,6 +165,19 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 - **Who a track was tried from** is `_sources_of()`: the live `TrackProgress.sources` plus what
   `source_history.py` kept from earlier downloads in `data/tried_sources.json`, read when a list is read and
   written after every download. The sockseek index does not hold user names, hence the file.
+- **The `Name on Soulseek` column shows what a file was named where it was shared**, which the user asked for:
+  the saved file is named after its tags and may be converted, so its name says little about what was taken.
+  Measured in mock mode: the `download_start` event and the `track_state` event of a success both carry
+  `filename`, the shared path with backslashes, for songs, for files downloaded through a link and for the files
+  of an album. `TrackProgress.soulseek_path` keeps it for the file being received or received (the shared folder
+  for an album) and is emptied when the track fails, waits again or is searched another way;
+  `TrackProgress.soulseek_name` is its last part. `_soulseek_name_of()` shows the live name while a file is
+  received and once it is, otherwise, for a row that has a file, the path `soulseek_paths.py` kept in
+  `data/soulseek_paths.json`, read when a list is read and written after every download. A track downloaded
+  again without a known path is forgotten there, so the name of a replaced file never stays. The full path and
+  the user are written to the log file after every download (`track -> user: path -> saved as`). The column
+  sits before `Details` so that it shows at the default window size, where `Details` is then partly cut: the
+  table is wider than that window, and the rest is reached by scrolling or by enlarging the window.
 - With several tracks selected, "Download from another source" avoids the sources of all of them for all of them:
   sockseek takes one list of banned users per run, and one run per track would mean one login per track.
 - A click on a heading sorts the table by that column, a second click reverses it, and an arrow in the heading
@@ -535,10 +550,10 @@ for tracks no spelling finds. 0.8.0, released on 2026-10-08 as well: "Show the f
 manager the user made the default on Windows, and Explorer on the right folder otherwise; and the artist is never
 left out of the matching any more, after two songs of other artists were saved for tracks searched by title alone: the
 relaxed search has no round without the artist, tracks whose artist is unsure go to sockseek in a run of their
-own, and the closest file must name the whole artist in one part of its path. What is known to work and what
-is not:
+own, and the closest file must name the whole artist in one part of its path. Added since 0.8.0 and not
+released yet: the `Name on Soulseek` column. What is known to work and what is not:
 
-- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (336
+- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (340
   tests, including the offline runs of the real sockseek and the hidden-window tests; the one reading the Windows
   registry is skipped on macOS), the build, and the smoke test showing that the packaged application starts and
   that the sockseek and ffmpeg packed inside answer.
@@ -550,7 +565,9 @@ is not:
   request queued during a download and fulfilled by it, a source left during a slow download, and a track asked
   as an album with its live file count. The two YouTube links the user reported read their 46 videos.
   `show_in_folder()` run for real on a file whose path holds spaces, a comma and a semicolon: File Pilot (the
-  default of the author's machine) and Explorer both opened its folder with the file selected.
+  default of the author's machine) and Explorer both opened its folder with the file selected. The
+  `Name on Soulseek` column, driven through the real window against the mock mode: two songs, a failed track and
+  an album downloaded, then the list read again, which showed the names again from the file that keeps them.
 - **Never checked**: what the window looks like on a Mac (fonts, the `clam` theme, dialogs, the right-click menu,
   which is opened by a secondary click or Control-click there), the first-launch steps on macOS described in
   `README.md`, and `piactl` at `/usr/local/bin/piactl`. The relaxed search, the album search and the options that

@@ -51,8 +51,11 @@ To update, install the new version over the old one. Settings and download histo
    `Already downloaded`, and the `Details` column names that file and its folder.
 3. **Download** connects the VPN, then follows every track live: status (waiting, searching, downloading,
    downloaded, failed), a progress bar, the amount received, the speed and the time left, the peer and file it comes
-   from, and finally the name it was saved as. The bar under the table shows the overall count, total speed and a
-   rough estimate of the time left for the whole list. The log names the folder the download is saved in.
+   from, and finally the name it was saved as. The `Name on Soulseek` column keeps the name the file had where it
+   was shared, before it was renamed after its tags or converted (for a whole album, the name of the shared
+   folder); it is still shown for tracks marked `Already downloaded`. The bar under the table shows the overall
+   count, total speed and a rough estimate of the time left for the whole list. The log names the folder the
+   download is saved in.
 4. **Stop** ends the download early; the VPN is disconnected as usual and a later Download resumes.
    Click a column heading (Artist, Title, Status...) to sort the table by it, and click again for the reverse
    order; an arrow in the heading shows the direction, and `#` gives the order of the playlist back.
@@ -250,6 +253,8 @@ Everything the application writes lives in one folder per user:
   while the file is still there, so there is nothing to edit in it.
 - `data/tried_sources.json`: the people each track was downloaded or tried from, which is what **Download from
   another source** avoids.
+- `data/soulseek_paths.json`: the folder and name each downloaded file had on Soulseek, which is what the
+  `Name on Soulseek` column shows for tracks downloaded earlier.
 - `data/inputs/`: the track lists handed to sockseek, one file per playlist.
 - `logs/`: the log files of the last 20 launches.
 

@@ -24,6 +24,7 @@ from tandem_dj.progress import (
 )
 from tandem_dj.search_variants import SearchVariant
 from tandem_dj.sockseek import AlbumDownload, DownloadReport
+from tandem_dj.soulseek_paths import read_soulseek_paths, soulseek_path_history_path
 from tandem_dj.source_history import read_tried_sources, source_history_path
 from tandem_dj.ui import main_window
 from tandem_dj.ui.main_window import (
@@ -203,7 +204,7 @@ def test_live_progress_and_final_report_reach_the_table(window, tmp_path):
     assert row["status"] == STATUS_DOWNLOADING
     assert row["progress"].endswith(" 50%")
     assert (row["size"], row["speed"], row["left"]) == ("5.0 MB / 10.0 MB", "5.0 MB/s", "1 s")
-    assert row["detail"] == "from peer: b.mp3"
+    assert (row["detail"], row["soulseek_name"]) == ("from peer: b.mp3", "b.mp3")
     assert "0 / 2 done" in window.summary_label.cget("text")
 
     report = DownloadReport(
@@ -222,6 +223,84 @@ def test_live_progress_and_final_report_reach_the_table(window, tmp_path):
     window._show_report(later_report, tmp_path)
     assert cells(window, 1)["status"] == STATUS_ALREADY_DOWNLOADED
     assert cells(window, 1)["detail"] == "already have Darude - Feel The Beat.mp3, in Old list"
+
+
+def test_the_name_a_file_has_on_soulseek_has_a_column_of_its_own(window, tmp_path):
+    """
+    While a file is received and once it is saved, its row shows what the file is named on Soulseek, whatever it
+    is saved as. The name is written down: a later reading of the list shows it again while the file is there,
+    and a file downloaded since without a known name does not keep the name of the earlier one.
+    """
+    saved_file = tmp_path / "Son 2 Teuf" / "Darude - Feel the Beat.mp3"
+    shared_path = "@@abc\\Trance\\03 darude_-_feel the beat (original).flac"
+    history_path = soulseek_path_history_path(window.settings)
+    index_path = window.settings.index_path
+    collection = TrackCollection(name="Son 2 Teuf", origin="spotify", tracks=[SKONE, DARUDE])
+    window._show_tracks(collection, [SKONE, DARUDE], duplicate_count=0, already_downloaded={})
+    tracker = ProgressTracker([SKONE, DARUDE])
+    window.tracker = tracker
+
+    def feed(event_type: str, **data) -> None:
+        """
+        Hand one progress event to the tracker.
+
+        :param event_type: Type of the event
+        :param data: Data of the event
+        """
+        tracker.handle_line(json.dumps({"type": event_type, "timestamp": "2026-10-07T15:37:01Z", "data": data}))
+
+    try:
+        feed("download_start", artist="Darude", title="Feel the Beat", username="peer", filename=shared_path, size=9)
+        feed("download_start", artist="Sköne", title="Afterlife", filename="music\\afterlife.mp3")
+        window._show_progress()
+        assert [cells(window, row)["soulseek_name"] for row in range(2)] == [
+            "afterlife.mp3",
+            "03 darude_-_feel the beat (original).flac",
+        ]
+
+        feed("track_state", artist="Sköne", title="Afterlife", lifecycleState="Terminal", terminalOutcome="Failed")
+        feed(
+            "track_state",
+            artist="Darude",
+            title="Feel the Beat",
+            lifecycleState="Terminal",
+            terminalOutcome="Succeeded",
+            downloadPath=str(saved_file),
+            filename=shared_path,
+        )
+        saved_file.parent.mkdir()
+        saved_file.write_bytes(b"not really audio")
+        report = DownloadReport(downloaded=[DARUDE], failed=[SKONE], saved_files={DARUDE: saved_file.as_posix()})
+        window._show_report(report, saved_file.parent)
+        assert cells(window, 1)["detail"] == "saved as Darude - Feel the Beat.mp3"
+        assert [cells(window, row)["soulseek_name"] for row in range(2)] == [
+            "",
+            "03 darude_-_feel the beat (original).flac",
+        ]
+        assert read_soulseek_paths(history_path, [SKONE, DARUDE]) == {DARUDE: shared_path}
+
+        index_path.parent.mkdir(parents=True, exist_ok=True)
+        index_path.write_text(
+            "filepath,artist,album,title,length,tracktype,state,failurereason\n"
+            f"{saved_file.as_posix()},Darude,,Feel the Beat,-1,0,1,0\n",
+            encoding="utf-8",
+        )
+        window._read("Sköne - Afterlife\nDarude - Feel the Beat", window.settings)
+        window._refresh()
+        assert [(cells(window, row)["status"], cells(window, row)["soulseek_name"]) for row in range(2)] == [
+            (STATUS_WAITING, ""),
+            (STATUS_ALREADY_DOWNLOADED, "03 darude_-_feel the beat (original).flac"),
+        ]
+
+        read_track = window.requested_tracks[1]
+        window._show_report(
+            DownloadReport(downloaded=[read_track], saved_files={read_track: saved_file.as_posix()}), saved_file.parent
+        )
+        assert (cells(window, 1)["status"], cells(window, 1)["soulseek_name"]) == ("Downloaded", "")
+        assert read_soulseek_paths(history_path, [DARUDE]) == {}
+    finally:
+        index_path.unlink(missing_ok=True)
+        history_path.unlink(missing_ok=True)
 
 
 def test_clicking_a_heading_sorts_the_table_and_marks_the_heading(window):
