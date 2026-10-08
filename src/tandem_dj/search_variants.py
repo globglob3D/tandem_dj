@@ -46,7 +46,11 @@ _DECORATION = (
 )
 _BRACKETED_DECORATION = re.compile(rf"\s*[(\[]\s*(?:{_DECORATION})\s*[)\]]", re.IGNORECASE)
 _TRAILING_DECORATION = re.compile(rf"\s+[-–—]\s+(?:{_DECORATION})\s*$", re.IGNORECASE)
-_BRACKETED_TEXT = re.compile(r"\s*[(\[{][^()\[\]{}]*[)\]}]")
+_BRACKETED_TEXT = re.compile(r"\s*[(\[{]([^()\[\]{}]*)[)\]}]")
+_BRACKETED_TEXT_DESCRIPTION = "what is in parentheses or brackets, except words such as Remix"
+_VERSION_WORD = re.compile(
+    r"\b(?:remix|rmx|rework|refix|bootleg|edit|flip|dub|vip|mix|version|instrumental|acoustic|live)\b", re.IGNORECASE
+)
 
 
 def relaxed_search_variants(track: Track) -> list["SearchVariant"]:
@@ -55,10 +59,10 @@ def relaxed_search_variants(track: Track) -> list["SearchVariant"]:
 
     Each step builds on the previous one: accents are removed, then elided articles and punctuation (the brackets
     themselves included, not what they hold), then decorations such as ``(Original Mix)`` and featured artists,
-    then everything written in parentheses or brackets, and finally the artist itself, with and without the
-    bracketed text. Steps that change nothing are left out. A search by title alone is only offered when the
-    length of the track is known or the title searched is long enough to be distinctive, and never for a track
-    whose artist is unsure, which is already searched that way.
+    then what is written in parentheses or brackets, except the words that name a version such as ``Remix``, and
+    finally the artist itself, with and without the bracketed text. Steps that change nothing are left out. A
+    search by title alone is only offered when the length of the track is known or the title searched is long
+    enough to be distinctive, and never for a track whose artist is unsure, which is already searched that way.
 
     :param track: Track that was not found under its exact name
     :returns: The variants to try in order, possibly none
@@ -71,12 +75,12 @@ def relaxed_search_variants(track: Track) -> list["SearchVariant"]:
         SearchVariant(artist, title, "without accents"),
         SearchVariant(simple_artist, simplify_punctuation(title), "without accents, articles and punctuation"),
         SearchVariant(simple_artist, simple_title, "also without decorations such as (Original Mix) or feat."),
-        SearchVariant(simple_artist, bare_title, "also without what is written in parentheses or brackets"),
+        SearchVariant(simple_artist, bare_title, f"also without {_BRACKETED_TEXT_DESCRIPTION}"),
     ]
     if simple_artist and not track.artist_is_uncertain:
         titles_alone = (
             (simple_title, "title alone, without the artist"),
-            (bare_title, "title alone, without the artist and what is written in parentheses or brackets"),
+            (bare_title, f"title alone, without the artist and {_BRACKETED_TEXT_DESCRIPTION}"),
         )
         for title_alone, description in titles_alone:
             if track.duration_seconds or len(title_alone.split()) >= MINIMUM_WORDS_FOR_TITLE_ONLY:
@@ -154,18 +158,29 @@ def strip_decorations(title: str) -> str:
 
 def strip_bracketed_text(title: str) -> str:
     """
-    Remove everything written in parentheses, square brackets or braces, with what they hold.
+    Remove what is written in parentheses, square brackets or braces, keeping only the words that name a version.
 
-    That text is most often a label, a catalogue number or a genre, which no file name carries. It can also name
-    a remix, so the result may stand for another recording than the title did.
+    That text is most often a label, a catalogue number or a genre, which no file name carries. When it names a
+    remix, the word ``Remix`` stays without the name of who made it, so that the search still asks for a remix
+    and not for the original: ``Glue (Hammer Remix) [Some Label]`` becomes ``Glue Remix``.
 
     :param title: Track title
     :returns: The title without those parts, or the title unchanged when nothing else would be left
     """
     stripped, previous = title, ""
     while stripped != previous:
-        previous, stripped = stripped, _BRACKETED_TEXT.sub("", stripped)
+        previous, stripped = stripped, _BRACKETED_TEXT.sub(_keep_version_words, stripped)
     return normalize_text(stripped) or title
+
+
+def _keep_version_words(match: re.Match[str]) -> str:
+    """
+    Decide what replaces one bracketed group while stripping bracketed text.
+
+    :param match: Regular expression match of a bracketed group and its leading whitespace
+    :returns: The words of the group that name a version, such as ``Remix`` or ``Dub Mix``, without the brackets
+    """
+    return "".join(f" {word}" for word in _VERSION_WORD.findall(match.group(1)))
 
 
 def _identity(artist: str, title: str) -> tuple[str, str]:

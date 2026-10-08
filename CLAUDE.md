@@ -205,15 +205,17 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 
 - `relaxed_search_variants(track)` returns the spellings to try in order: accents folded, then elided articles and
   punctuation removed, then decorations removed (`strip_decorations()` keeps remix and edit names on purpose), then
-  everything in parentheses or brackets removed (`strip_bracketed_text()`), then the title alone, with and
-  without that bracketed text. Steps that change nothing are left out, so a track has at most six variants and
+  what is in parentheses or brackets removed except version words (`strip_bracketed_text()`), then the title
+  alone, with and without that bracketed text. Steps that change nothing are left out, so a track has at most six variants and
   usually two or three. Round N of `search_failed_tracks_again()` searches every still-missing track under its
   Nth variant; two tracks never share a spelling within a round.
 - **The order for brackets is the user's**: the title as written first, then without the brackets themselves
   (`Kowloon City LFEK007`, which the punctuation step gives), then without what they hold (`Kowloon City`).
-  Slashes, colons, semicolons and other signs go in the punctuation step too. A remix name is therefore dropped
-  in the end as well; the `Length` column and the `Downloaded - check` flag are what guard against the original
-  being taken for the remix.
+  Slashes, colons, semicolons and other signs go in the punctuation step too.
+- **The word that names a version always stays** (`_VERSION_WORD`: remix, edit, dub, mix, version, live...), also
+  the user's decision: `(DJ Gigola & RIP Swirl HC Remix) [URAF01]` becomes `Remix`. The name of the remixer is
+  lost, the fact that a remix is wanted is not, and few songs have several well-known remixes. Never add a
+  search that drops that word: it would bring the original.
 - `SockseekDownloader.download_variants()` runs sockseek with **an index of its own** (deleted afterwards), then
   `record_downloads()` marks the found tracks as downloaded in the download history **under their real name**. The
   history therefore never holds a search spelling, and "already downloaded" keeps working for those tracks.

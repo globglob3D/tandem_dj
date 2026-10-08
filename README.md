@@ -169,14 +169,15 @@ again, in up to six rounds, each one looser than the last:
 | 1 | Accents removed | `Skone - L'arret sur image (Original Mix) [LABEL01]` |
 | 2 | Elided articles (`l'`, `d'`...) and punctuation removed, brackets, slashes and colons included | `Skone - arret sur image Original Mix LABEL01` |
 | 3 | Decorations removed: `(Original Mix)`, `feat. X`, remaster notes | `Skone - arret sur image LABEL01` |
-| 4 | Everything in parentheses or brackets removed | `Skone - arret sur image` |
+| 4 | What is in parentheses or brackets removed, except words such as `Remix` | `Skone - arret sur image` |
 | 5 | Title alone, without the artist | `arret sur image LABEL01` |
 | 6 | Title alone, without what was in parentheses or brackets | `arret sur image` |
 
 A round that would repeat an earlier search is left out, so most tracks need two or three. What stands in
 parentheses or brackets is most often a label or a catalogue number, but it can be a remix name: it is kept as long
-as possible, and round 4 searches without it. The title is only searched alone when the length of the track is known
-or the title has at least three words.
+as possible, and from round 4 only the word naming the version stays. `Glue (Hammer Remix) [Some Label]` is then
+searched as `Glue Remix`: the remixer is no longer named, but a remix is still what is asked for. The title is only
+searched alone when the length of the track is known or the title has at least three words.
 
 A looser search can return another recording than the one you wanted, so a track found this way is shown as
 **Downloaded - check** in amber, with the search that found it. When the length of the track is known (Spotify

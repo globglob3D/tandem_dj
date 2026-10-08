@@ -72,15 +72,15 @@ def test_bracketed_text_is_kept_first_then_searched_bare_then_dropped():
     ]
     assert [variant.description for variant in relaxed_search_variants(track)] == [
         "without accents, articles and punctuation",
-        "also without what is written in parentheses or brackets",
+        "also without what is in parentheses or brackets, except words such as Remix",
         "title alone, without the artist",
-        "title alone, without the artist and what is written in parentheses or brackets",
+        "title alone, without the artist and what is in parentheses or brackets, except words such as Remix",
     ]
 
 
-def test_a_remix_name_is_only_dropped_after_the_searches_that_keep_it():
+def test_the_word_remix_stays_when_the_name_of_the_remixer_is_dropped():
     """
-    The remix named in parentheses is searched first; the label next to it goes with it in the bare search.
+    The remix named in parentheses is searched first; then the label and the remixer go, and the word Remix stays.
     """
     track = Track(
         artists=("Wolfram & Haddaway",),
@@ -89,9 +89,9 @@ def test_a_remix_name_is_only_dropped_after_the_searches_that_keep_it():
     )
     assert queries(track) == [
         "Wolfram Haddaway - My Love Is For Real DJ Gigola RIP Swirl HC Remix URAF01",
-        "Wolfram Haddaway - My Love Is For Real",
+        "Wolfram Haddaway - My Love Is For Real Remix",
         "My Love Is For Real DJ Gigola RIP Swirl HC Remix URAF01",
-        "My Love Is For Real",
+        "My Love Is For Real Remix",
     ]
 
 
@@ -103,7 +103,7 @@ def test_a_short_bare_title_is_not_searched_alone_without_a_length():
     assert queries(remix) == [
         "Bicep - Glue Hammer Remix Remastered 2021",
         "Bicep - Glue Hammer Remix",
-        "Bicep - Glue",
+        "Bicep - Glue Remix",
         "Glue Hammer Remix",
     ]
 
@@ -192,9 +192,14 @@ def test_strip_decorations(title, expected):
     ("title", "expected"),
     [
         ("Kowloon City [LFEK007]", "Kowloon City"),
-        ("Glue (Hammer Remix)", "Glue"),
-        ("Glue (Hammer Remix) [Some Label] {2021}", "Glue"),
-        ("Glue (Hammer [Club] Remix)", "Glue"),
+        ("Glue (Hammer Remix)", "Glue Remix"),
+        ("Glue (Hammer Remix) [Some Label] {2021}", "Glue Remix"),
+        ("Glue (Hammer [Club] Remix)", "Glue Remix"),
+        ("Glue (Hammer Dub Mix)", "Glue Dub Mix"),
+        ("Glue (Radio Edit)", "Glue Edit"),
+        ("Glue ('95 Heavy Version)", "Glue Version"),
+        ("Glue (Live at Some Club)", "Glue Live"),
+        ("Glue (Mixmag Premiere) [Dubstep]", "Glue"),
         ("Glue (Part One) Reprise", "Glue Reprise"),
         ("Glue", "Glue"),
         ("[untitled]", "[untitled]"),
@@ -202,6 +207,7 @@ def test_strip_decorations(title, expected):
 )
 def test_strip_bracketed_text(title, expected):
     """
-    Parentheses, square brackets and braces go with what they hold, nested ones included; a title is never emptied.
+    Parentheses, square brackets and braces go with what they hold, nested ones included, except the words that
+    name a version; a title is never emptied.
     """
     assert strip_bracketed_text(title) == expected
