@@ -550,8 +550,9 @@ for tracks no spelling finds. 0.8.0, released on 2026-10-08 as well: "Show the f
 manager the user made the default on Windows, and Explorer on the right folder otherwise; and the artist is never
 left out of the matching any more, after two songs of other artists were saved for tracks searched by title alone: the
 relaxed search has no round without the artist, tracks whose artist is unsure go to sockseek in a run of their
-own, and the closest file must name the whole artist in one part of its path. Added since 0.8.0 and not
-released yet: the `Name on Soulseek` column. What is known to work and what is not:
+own, and the closest file must name the whole artist in one part of its path. 0.9.0, released on
+2026-10-08 too, added the `Name on Soulseek` column, which shows what each downloaded file was named where it
+was shared. What is known to work and what is not:
 
 - **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (340
   tests, including the offline runs of the real sockseek and the hidden-window tests; the one reading the Windows
