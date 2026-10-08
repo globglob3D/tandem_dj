@@ -155,7 +155,8 @@ class ProgressTracker:
                 if file is None:
                     entry.status, entry.detail = STATUS_FAILED, NOTHING_CLOSE_ENOUGH
                     continue
-                self._entry_by_variant[track_key("", file.stem)] = entry
+                for download_name in file.download_names:
+                    self._entry_by_variant[track_key("", download_name)] = entry
                 self._entry_by_job = {job: other for job, other in self._entry_by_job.items() if other is not entry}
                 entry.status, entry.closest_file, entry.total_bytes = STATUS_WAITING, file.file_name, file.size
                 entry.detail = f"closest file found: {file.file_name}, shared by {file.username}"

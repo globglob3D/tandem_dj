@@ -293,11 +293,12 @@ class SockseekDownloader:
         )
         self._tidy_batch_directory()
         entries = read_index(files_index_path)
-        saved_files = {
-            track: entry.file_path
-            for track, file in files.items()
-            if (entry := entries.get(track_key("", file.stem))) is not None and entry.is_downloaded
-        }
+        saved_files: dict[Track, str] = {}
+        for track, file in files.items():
+            file_entries = (entries.get(track_key("", download_name)) for download_name in file.download_names)
+            entry = next((entry for entry in file_entries if entry is not None and entry.is_downloaded), None)
+            if entry is not None:
+                saved_files[track] = entry.file_path
         record_downloads(self.settings.index_path, saved_files)
         files_index_path.unlink(missing_ok=True)
         was_only_interrupted = self._restart_requested.is_set() and (keep_running is None or keep_running())

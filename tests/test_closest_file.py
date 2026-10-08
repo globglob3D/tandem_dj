@@ -190,9 +190,11 @@ def test_first_artist(artist, expected):
 
 def test_link_encodes_what_sockseek_would_decode():
     """
-    The link names the user and the path with forward slashes, with every special character percent-encoded.
+    The link names the user and the path as that user shares it, with every special character percent-encoded,
+    the backslashes between folders included.
     """
     file = SharedFile(username="some user", path="@@abc\\Music\\100% Pure #1 + more.mp3")
-    assert file.link == "slsk://some%20user/%40%40abc/Music/100%25%20Pure%20%231%20%2B%20more.mp3"
+    assert file.link == "slsk://some%20user/%40%40abc%5CMusic%5C100%25%20Pure%20%231%20%2B%20more.mp3"
     assert file.file_name == "100% Pure #1 + more.mp3"
     assert file.stem == "100% Pure #1 + more"
+    assert file.download_names == ("100% Pure #1 + more", "@@abc\\Music\\100% Pure #1 + more")

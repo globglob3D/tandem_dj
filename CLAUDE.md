@@ -257,9 +257,12 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 - `SockseekDownloader.download_files()` downloads the chosen files in one run, from a list file of quoted
   `slsk://user/path` links (`--input-type list`), with an index of its own, then `record_downloads()` marks the
   tracks in the history under their real name. Measured in mock mode: **sockseek decodes the link**, so a `+`
-  left as it is becomes a space and the file is not found; `SharedFile.link` percent-encodes everything. The
-  index of such a run names each file by its file name without extension and has no artist; two files of the
-  same name overwrite each other, so `_pick_files()` never puts two in one run.
+  left as it is becomes a space and the file is not found; `SharedFile.link` percent-encodes everything, **the
+  backslashes between folders included** (`slsk://user/folder%5Cfile.mp3`). Seen on the macOS runners: a link
+  written with forward slashes between folders downloaded a file at the top of the shared folder but not one
+  inside a folder, while it did both on Windows. The index of such a run names each file by its file name
+  without extension and has no artist (`SharedFile.download_names` also allows for the whole path); two files
+  of the same name overwrite each other, so `_pick_files()` never puts two in one run.
 - When a chosen file does not arrive, the next closest is tried, `MAXIMUM_CLOSEST_FILE_ATTEMPTS` (3) runs at
   most. `control.skip_source()` ends the run in progress and the files of that user are passed over.
 - Tracks found this way are in `report.relaxed_matches` with `CLOSEST_FILE_DESCRIPTION`, so they show

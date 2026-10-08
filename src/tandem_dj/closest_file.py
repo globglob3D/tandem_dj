@@ -111,12 +111,24 @@ class SharedFile:
         Build the link sockseek downloads this very file from.
 
         Every character that is not a letter or a digit is percent-encoded, because sockseek decodes the link: a
-        ``+`` left as it is would be read as a space.
+        ``+`` left as it is would be read as a space. The backslashes between folders are encoded too, so that
+        sockseek asks the user for the path exactly as that user shares it, whatever system this runs on.
 
-        :returns: Link of the form ``slsk://user/folder/file.mp3``
+        :returns: Link of the form ``slsk://user/folder%5Cfile.mp3``
         """
-        folders_and_file = self.path.replace("\\", "/").lstrip("/")
-        return LINK_PREFIX + urllib.parse.quote(self.username, safe="") + "/" + urllib.parse.quote(folders_and_file)
+        return LINK_PREFIX + urllib.parse.quote(self.username, safe="") + "/" + urllib.parse.quote(self.path, safe="")
+
+    @property
+    def download_names(self) -> tuple[str, ...]:
+        """
+        List the titles sockseek may give to the download of this file through its link.
+
+        Sockseek names such a download after the file. A system that does not read backslashes as separators
+        could name it after the whole path, so both names are told.
+
+        :returns: The name of the file without its extension, then its whole path without its extension
+        """
+        return self.stem, self.path.rsplit(".", 1)[0]
 
 
 def broad_searches(track: Track) -> list[str]:

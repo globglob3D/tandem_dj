@@ -748,9 +748,10 @@ def test_chosen_files_are_downloaded_and_remembered_under_the_name_of_their_trac
         gone: SharedFile(username="local", path="Odd folder\\Nobody Real - Missing Song.mp3"),
     }
 
-    saved_files, stopped_early = downloader.download_files(files, "Broad list")
+    sockseek_lines: list[str] = []
+    saved_files, stopped_early = downloader.download_files(files, "Broad list", on_output_line=sockseek_lines.append)
     assert not stopped_early
-    assert list(saved_files) == [track]
+    assert list(saved_files) == [track], "sockseek said: " + "".join(sockseek_lines)[-1500:]
     assert Path(saved_files[track]).is_file()
     assert Path(saved_files[track]).parent == downloader.batch_directory
     assert Path(saved_files[track]).name == odd_name
