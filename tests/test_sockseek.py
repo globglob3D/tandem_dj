@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from tandem_dj.album_search import AlbumSearch
+from tandem_dj.closest_file import SharedFile
 from tandem_dj.config import Settings
 from tandem_dj.models import Track
 from tandem_dj.paths import bundled_sockseek
@@ -22,6 +23,7 @@ from tandem_dj.sockseek import (
     build_report,
     find_already_downloaded,
     forget_downloads,
+    read_search_results,
     record_downloads,
     remove_duplicates,
     repair_index,
@@ -679,3 +681,116 @@ def test_track_found_under_another_spelling_is_remembered_under_its_real_name(tm
     second_report = downloader.download([track, hopeless], "French list")
     assert second_report.already_downloaded == [track]
     assert second_report.failed == [hopeless]
+
+
+@pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file(), reason="sockseek is not installed in vendor/sockseek")
+def test_search_lists_every_file_of_each_search_and_downloads_nothing(tmp_path):
+    """
+    Sockseek answers each search with every audio file holding its words, in the order of the searches, an empty
+    answer included. Nothing is downloaded, no folder is left behind, and the history is not touched. Files of a
+    user to avoid are left out.
+    """
+    shared_files = tmp_path / "shared"
+    (shared_files / "Trance").mkdir(parents=True)
+    for name in ("Cherry Moon Trax - The House Of House.mp3", "Cherry Moon Trax - Let There Be House.flac"):
+        (shared_files / "Trance" / name).write_bytes(b"not really audio")
+    (shared_files / "Trance" / "Cherry Moon Trax - cover.jpg").write_bytes(b"not audio at all")
+    (shared_files / "Bauernfeind - Kowloon City.mp3").write_bytes(b"not really audio")
+    settings = make_settings(
+        tmp_path, extra_arguments=("--mock-files-dir", str(shared_files), "--mock-files-no-read-tags", "--no-progress")
+    )
+    downloader = make_downloader(settings)
+    other_lines: list[str] = []
+
+    queries = ["Kowloon City", "nothing like this", "Cherry Moon"]
+    results, stopped_early = downloader.search(queries, "Broad list", on_output_line=other_lines.append)
+    assert not stopped_early
+    assert list(results) == queries
+    assert [(file.username, file.path) for file in results["Kowloon City"]] == [
+        ("local", "Bauernfeind - Kowloon City.mp3")
+    ]
+    assert results["nothing like this"] == []
+    assert sorted(file.path for file in results["Cherry Moon"]) == [
+        "Trance\\Cherry Moon Trax - Let There Be House.flac",
+        "Trance\\Cherry Moon Trax - The House Of House.mp3",
+    ]
+    assert all(file.length_seconds for file in results["Cherry Moon"])
+    assert not settings.output_directory.joinpath(BATCH_FOLDER_NAME).exists()
+    assert not settings.index_path.exists()
+    assert [path.name for path in settings.index_path.parent.joinpath("inputs").iterdir()] == [
+        "Broad_list_broad_search.csv"
+    ]
+
+    downloader.avoided_sources = ("local",)
+    avoided_results, _ = downloader.search(["Kowloon City"], "Broad list")
+    assert avoided_results == {"Kowloon City": []}
+
+
+@pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file(), reason="sockseek is not installed in vendor/sockseek")
+def test_chosen_files_are_downloaded_and_remembered_under_the_name_of_their_track(tmp_path):
+    """
+    A file picked among search results is downloaded through its link, whatever signs its name holds, and the
+    download history then holds the track under its real name, so the next run skips it. A file that is no longer
+    shared leaves its track out.
+    """
+    shared_files = tmp_path / "shared"
+    (shared_files / "Odd folder").mkdir(parents=True)
+    odd_name = "Infectious - I Need Your Loving 100% #1 + more.mp3"
+    (shared_files / "Odd folder" / odd_name).write_bytes(b"not really audio")
+    settings = make_settings(
+        tmp_path, extra_arguments=("--mock-files-dir", str(shared_files), "--mock-files-no-read-tags", "--no-progress")
+    )
+    track = Track(artists=("Infectious!",), title="I Need Your Lovin' ('95 Happy Hardcore Heavy Version)")
+    gone = Track(artists=("Nobody Real",), title="Missing Song")
+    downloader = make_downloader(settings)
+    files = {
+        track: SharedFile(username="local", path=f"Odd folder\\{odd_name}"),
+        gone: SharedFile(username="local", path="Odd folder\\Nobody Real - Missing Song.mp3"),
+    }
+
+    saved_files, stopped_early = downloader.download_files(files, "Broad list")
+    assert not stopped_early
+    assert list(saved_files) == [track]
+    assert Path(saved_files[track]).is_file()
+    assert Path(saved_files[track]).parent == downloader.batch_directory
+    assert Path(saved_files[track]).name == odd_name
+    assert not downloader.batch_directory.joinpath(".sockseek-staging").exists()
+
+    index_text = settings.index_path.read_text(encoding="utf-8-sig")
+    assert "I Need Your Lovin' ('95 Happy Hardcore Heavy Version)" in index_text
+    assert "Loving" not in index_text.replace(odd_name, "")
+    assert sorted(path.name for path in settings.index_path.parent.joinpath("inputs").iterdir()) == [
+        "Broad_list_chosen_files.txt"
+    ]
+
+    report = downloader.download([track, gone], "Broad list")
+    assert report.already_downloaded == [track]
+    assert report.failed == [gone]
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("[]", []),
+        (
+            '[{"User":{"Username":"someone","UploadSpeed":12.5,"HasFreeUploadSlot":true},'
+            '"File":{"Length":379,"Filename":"@@abc\\\\Music\\\\Some Song.mp3","Size":4096}},'
+            '{"User":{"Username":"someone"},"File":{"Filename":"@@abc\\\\Music\\\\folder.jpg","Size":10}},'
+            '{"User":{"Username":"other"},"File":{"Filename":"Some Song.FLAC","Length":-1}}]',
+            [
+                SharedFile(username="someone", path="@@abc\\Music\\Some Song.mp3", length_seconds=379, size=4096),
+                SharedFile(username="other", path="Some Song.FLAC"),
+            ],
+        ),
+        ("[001] SongJob: searching: Some Song", None),
+        ('{"type":"search_start","data":{"title":"Some Song"}}', None),
+        ("[cli] Completed: 2 succeeded, 1 failed.", None),
+        ("[1, 2]", None),
+        ("", None),
+    ],
+)
+def test_read_search_results(line, expected):
+    """
+    Only the lists of results sockseek prints are read; log lines and progress events are something else.
+    """
+    assert read_search_results(line) == expected

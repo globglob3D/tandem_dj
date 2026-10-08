@@ -8,16 +8,18 @@ where it was saved. A track whose file was moved or deleted is downloaded again.
 
 import contextlib
 import csv
+import json
 import re
 import shutil
 import subprocess
 import threading
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import IO
 
 from tandem_dj.album_search import MINIMUM_ALBUM_TRACKS, AlbumSearch
+from tandem_dj.closest_file import SharedFile
 from tandem_dj.config import Settings
 from tandem_dj.conversion import CONVERTIBLE_EXTENSIONS, MP3_EXTENSION
 from tandem_dj.models import Track
@@ -28,6 +30,12 @@ INPUT_DIRECTORY_NAME = "inputs"
 RELAXED_INPUT_SUFFIX = "relaxed_search"
 RELAXED_INDEX_SUFFIX = ".index.csv"
 ALBUM_INPUT_SUFFIX = "album_search"
+BROAD_INPUT_SUFFIX = "broad_search"
+CHOSEN_FILES_SUFFIX = "chosen_files"
+CHOSEN_FILES_EXTENSION = ".txt"
+INPUT_TYPE_CSV = "csv"
+INPUT_TYPE_LIST = "list"
+PRINT_EVERY_RESULT = ("--print", "json-all")
 ALBUM_NAME_FORMAT = "{slsk-foldername}/{slsk-filename}"
 INCOMPLETE_ALBUM_ACTION = "delete"
 INDEX_RELATIVE_PREFIX = "./"
@@ -191,6 +199,110 @@ class SockseekDownloader:
         record_downloads(self.settings.index_path, {track: entry.file_path})
         return AlbumDownload(folder=entry.file_path, files=tuple(files), query=search.query), stopped_early
 
+    def search(
+        self,
+        queries: Sequence[str],
+        name: str,
+        keep_running: Callable[[], bool] | None = None,
+        on_output_line: Callable[[str], None] | None = None,
+    ) -> tuple[dict[str, list[SharedFile]], bool]:
+        """
+        Ask Soulseek which files it holds for some searches, without downloading any.
+
+        Sockseek runs once on all the searches and prints, for each one, every audio file that came back, in its
+        own order of preference. Files of the users to avoid are left out.
+
+        :param queries: Words to search for, one search per entry
+        :param name: Name of the batch, used to name the generated sockseek input file
+        :param keep_running: Condition checked every few seconds; sockseek is stopped once it returns ``False``
+        :param on_output_line: Receiver of the other lines sockseek prints, called from a background thread
+        :returns: The files found for each search, empty for all of them when sockseek did not answer for every
+            search, and whether sockseek was stopped early
+        :raises DownloadError: If sockseek or the download folder is not available
+        """
+        self.check_ready()
+        input_path = self.input_path_for(f"{name} {BROAD_INPUT_SUFFIX}")
+        search_index_path = input_path.with_suffix(RELAXED_INDEX_SUFFIX)
+        search_index_path.unlink(missing_ok=True)
+        write_input_rows([{"Artist": "", "Title": query, "Album": "", "Length": ""} for query in queries], input_path)
+        answers: list[list[SharedFile]] = []
+
+        def receive_line(line: str) -> None:
+            """
+            Keep the results sockseek prints for one search, and pass any other line on.
+
+            :param line: Line printed by sockseek
+            """
+            files = read_search_results(line)
+            if files is not None:
+                answers.append(files)
+            elif on_output_line is not None:
+                on_output_line(line)
+
+        command = [*self.build_command(input_path, index_path=search_index_path), *PRINT_EVERY_RESULT]
+        _, stopped_early = run_while(command, keep_running, on_output_line=receive_line)
+        self._tidy_batch_directory()
+        search_index_path.unlink(missing_ok=True)
+        if len(answers) != len(queries):
+            return {query: [] for query in queries}, stopped_early
+        left_out = {*self.avoided_sources, *self.skipped_sources}
+        results = {
+            query: [file for file in files if file.username not in left_out]
+            for query, files in zip(queries, answers, strict=True)
+        }
+        return results, stopped_early
+
+    def download_files(
+        self,
+        files: Mapping[Track, SharedFile],
+        name: str,
+        keep_running: Callable[[], bool] | None = None,
+        on_output_line: Callable[[str], None] | None = None,
+    ) -> tuple[dict[Track, str], bool]:
+        """
+        Download files chosen among search results, and record the ones received under the name of their track.
+
+        Sockseek runs once on the links of the files, with an index of its own in which each file is named after
+        its file name; two files of one run must therefore not share a file name. Tracks whose file arrived are
+        then marked as downloaded in the history. A run interrupted by :meth:`skip_source` simply ends.
+
+        :param files: File to download for each track
+        :param name: Name of the batch, used to name the generated sockseek input file
+        :param keep_running: Condition checked every few seconds; sockseek is stopped once it returns ``False``
+        :param on_output_line: Receiver of every line sockseek prints, called from a background thread
+        :returns: The file each track was saved to, for the tracks whose file arrived, and whether sockseek was
+            stopped early by ``keep_running``
+        :raises DownloadError: If sockseek, the download folder or the folder of the batch is not available
+        """
+        self.check_ready()
+        input_path = self.input_path_for(f"{name} {CHOSEN_FILES_SUFFIX}").with_suffix(CHOSEN_FILES_EXTENSION)
+        files_index_path = input_path.with_suffix(RELAXED_INDEX_SUFFIX)
+        files_index_path.unlink(missing_ok=True)
+        input_path.parent.mkdir(parents=True, exist_ok=True)
+        input_path.write_text("".join(f'"{file.link}"\n' for file in files.values()), encoding="utf-8")
+        self._restart_requested.clear()
+        self._create_batch_directory()
+        command = self.build_command(
+            input_path,
+            emit_progress_events=on_output_line is not None,
+            index_path=files_index_path,
+            input_type=INPUT_TYPE_LIST,
+        )
+        _, stopped_early = run_while(
+            command, keep_running, on_output_line=on_output_line, interrupted=self._restart_requested.is_set
+        )
+        self._tidy_batch_directory()
+        entries = read_index(files_index_path)
+        saved_files = {
+            track: entry.file_path
+            for track, file in files.items()
+            if (entry := entries.get(track_key("", file.stem))) is not None and entry.is_downloaded
+        }
+        record_downloads(self.settings.index_path, saved_files)
+        files_index_path.unlink(missing_ok=True)
+        was_only_interrupted = self._restart_requested.is_set() and (keep_running is None or keep_running())
+        return saved_files, stopped_early and not was_only_interrupted
+
     def skip_source(self, username: str) -> None:
         """
         Stop downloading from a Soulseek user, for the rest of the life of this downloader.
@@ -248,16 +360,18 @@ class SockseekDownloader:
         emit_progress_events: bool = False,
         index_path: Path | None = None,
         album: bool = False,
+        input_type: str = INPUT_TYPE_CSV,
     ) -> list[str]:
         """
         Assemble the sockseek command line for one input file.
 
-        :param input_path: CSV file listing the tracks to download
+        :param input_path: File listing what to download: tracks as CSV rows, or links of chosen files
         :param tracks: Tracks listed in the file; an unsure artist among them makes sockseek also search by title
         :param emit_progress_events: Whether sockseek prints its progress as JSON lines
         :param index_path: Index file sockseek reads and writes, the download history by default
         :param album: Whether the file lists albums: each one is saved in a folder of its own, under the file
             names it has on Soulseek, and must hold several songs
+        :param input_type: What the file holds, one of the ``INPUT_TYPE_`` constants
         :returns: The program path followed by its arguments
         """
         settings = self.settings
@@ -265,7 +379,7 @@ class SockseekDownloader:
             str(settings.sockseek_executable),
             str(input_path),
             "--input-type",
-            "csv",
+            input_type,
             "--no-config",
             "--user",
             settings.soulseek_username,
@@ -583,6 +697,43 @@ def _wait_while(
             if must_stop:
                 process.kill()
                 return process.wait(), True
+
+
+def read_search_results(line: str) -> list[SharedFile] | None:
+    """
+    Read the line sockseek prints for one search when asked for every result, as with ``--print json-all``.
+
+    The line is a JSON list with one object per file, holding ``User.Username``, ``File.Filename`` (the path with
+    backslashes), ``File.Length`` in seconds and ``File.Size``. Files that are not audio are left out.
+
+    :param line: Line printed by sockseek
+    :returns: The audio files of the line in the order they are listed; ``None`` when the line is something else
+    """
+    text = line.strip()
+    if not text.startswith("["):
+        return None
+    try:
+        results = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(results, list) or not all(isinstance(result, dict) for result in results):
+        return None
+    files: list[SharedFile] = []
+    for result in results:
+        user, file = result.get("User") or {}, result.get("File") or {}
+        username, path = str(user.get("Username") or ""), str(file.get("Filename") or "")
+        if not username or not path or PureWindowsPath(path).suffix.lower() not in AUDIO_EXTENSIONS:
+            continue
+        length, size = file.get("Length"), file.get("Size")
+        files.append(
+            SharedFile(
+                username=username,
+                path=path,
+                length_seconds=int(length) if isinstance(length, int | float) and length > 0 else None,
+                size=int(size) if isinstance(size, int | float) and size > 0 else 0,
+            )
+        )
+    return files
 
 
 def input_row(track: Track) -> dict[str, str]:
