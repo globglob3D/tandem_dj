@@ -532,10 +532,13 @@ whole playlist behind a YouTube video link. 0.7.0, released on 2026-10-08, made 
 find: titles written `Artist : Title` or `Artist / Title` are split, the relaxed search drops what titles hold in
 brackets step by step while keeping the word naming a version, and the closest file of a broader search is taken
 for tracks no spelling finds. Since 0.7.0, not released yet: "Show the file in its folder" opens the file manager
-the user made the default on Windows, and Explorer on the right folder otherwise. What is known to work and what
+the user made the default on Windows, and Explorer on the right folder otherwise; and the artist is never left
+out of the matching any more, after two songs of other artists were saved for tracks searched by title alone: the
+relaxed search has no round without the artist, tracks whose artist is unsure go to sockseek in a run of their
+own, and the closest file must name the whole artist in one part of its path. What is known to work and what
 is not:
 
-- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (333
+- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (336
   tests, including the offline runs of the real sockseek and the hidden-window tests; the one reading the Windows
   registry is skipped on macOS), the build, and the smoke test showing that the packaged application starts and
   that the sockseek and ffmpeg packed inside answer.
@@ -560,7 +563,11 @@ is not:
   `--print json-all` prints (other fields, how many files a broad search such as an artist alone returns before
   Soulseek cuts it), links to users whose name holds spaces or signs, and whether its thresholds pick the right
   file are all unknown. Each track still missing costs two more searches, against Soulseek's limit of 34 per
-  220 seconds that sockseek paces itself to. "Show the file in its folder" was only run with File Pilot and
+  220 seconds that sockseek paces itself to. The stricter matching by artist has only run against the mock mode
+  and the tests, which hold the paths of the user's log. **Still matched without an artist**: a track whose
+  artist is unsure (an uploader or channel name) is searched by sockseek by title alone as well, and its closest
+  file is accepted on its title with a matching length or a title of three words; the user has not decided
+  whether those should end as not found too. "Show the file in its folder" was only run with File Pilot and
   Explorer: what XYplorer or another file manager does when its folder command is handed a file (select it, as
   expected, or open it) is not measured, nor are file managers that replace Explorer without registering a
   command under `Directory\shell`.
