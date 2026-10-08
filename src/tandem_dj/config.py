@@ -33,7 +33,8 @@ class Settings:
     :param name_format: File naming pattern, in sockseek's ``--name-format`` syntax; only the settings file sets it
     :param preferred_formats: File formats to pick first when several are available
     :param preferred_minimum_bitrate: Bitrate, in kbps, below which a file is only a fallback
-    :param relaxed_search: Whether tracks that are not found are searched again under simpler spellings
+    :param relaxed_search: Whether tracks that are not found are searched again under simpler spellings, then
+        more broadly for the closest file
     :param silent_source_seconds: Time a source may send nothing before sockseek drops it for the next one
     :param album_search: Whether an entry that looks like a whole album and is not found as a song is searched,
         and downloaded, as an album
@@ -250,7 +251,8 @@ preferred_formats = {preferred_formats}
 preferred_minimum_bitrate = {preferred_minimum_bitrate}
 
 # When true, tracks that are not found are searched again under simpler spellings: without accents, without
-# articles and punctuation, without decorations such as (Original Mix), and finally by title alone.
+# articles and punctuation, without decorations such as (Original Mix), without what is in brackets, and by title
+# alone. The ones still missing are then searched more broadly, and the closest file of what comes back is taken.
 relaxed_search = {relaxed_search}
 
 # When true, an entry that is not found as a song and looks like a whole album (announced as "full album", or 15

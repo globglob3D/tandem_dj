@@ -48,6 +48,7 @@ from tandem_dj.ui.table_sort import POSITION_COLUMN, SortOrder, sort_value, sort
 from tandem_dj.ui.theme import STATUS_ALBUM, STATUS_FOUND_RELAXED, STATUS_NOT_FINISHED
 from tandem_dj.vpn import VPN_MODE_NONE, VpnError, VpnGuard
 from tandem_dj.workflow import (
+    CLOSEST_FILE_DESCRIPTION,
     LEVEL_ERROR,
     LEVEL_INFORMATION,
     LEVEL_SUCCESS,
@@ -824,6 +825,8 @@ class MainWindow(tkinter.Tk):
             on_album_result=lambda track, album: tracker.finish_album(
                 track, album.folder if album else "", len(album.files) if album else 0
             ),
+            on_broad_search=tracker.follow_broad_search,
+            on_closest_files=tracker.follow_closest_files,
         )
         self.messages.put(("finished", report, batch_directory))
 
@@ -1015,7 +1018,7 @@ class MainWindow(tkinter.Tk):
             status = entry.status
             if entry.status == STATUS_DOWNLOADED and entry.album_query:
                 status = STATUS_ALBUM
-            elif entry.status == STATUS_DOWNLOADED and entry.relaxed_query:
+            elif entry.status == STATUS_DOWNLOADED and (entry.relaxed_query or entry.closest_file):
                 status = STATUS_FOUND_RELAXED
             self._show_row(entry.track, status, _describe_progress(entry), entry)
         self._sort_rows()
@@ -1080,7 +1083,10 @@ class MainWindow(tkinter.Tk):
                 )
             elif relaxed_match is not None:
                 status = STATUS_FOUND_RELAXED
-                detail = f'saved as {file_name}, found by searching "{relaxed_match.query}": check it'
+                detail = f'saved as {file_name}, found by searching "{relaxed_match.query}"'
+                if relaxed_match.description == CLOSEST_FILE_DESCRIPTION:
+                    detail += " and taking the closest file"
+                detail += ": check it"
             self._show_row(track, status, _draw_bar(100), live_entries.get(track), detail)
         for track in report.already_downloaded:
             detail = report.notes.get(track) or _describe_existing_file(report.saved_files.get(track, ""))
@@ -1097,9 +1103,7 @@ class MainWindow(tkinter.Tk):
         finished_count = len(totals.downloaded) + len(totals.already_downloaded) + len(totals.failed)
         self.overall_bar.configure(maximum=max(len(self.row_tracks), finished_count, 1), value=finished_count)
         relaxed_note = (
-            f" ({len(totals.relaxed_matches)} found under a simpler spelling: check them)"
-            if totals.relaxed_matches
-            else ""
+            f" ({len(totals.relaxed_matches)} found by a looser search: check them)" if totals.relaxed_matches else ""
         )
         if totals.albums:
             relaxed_note += f" ({len(totals.albums)} as whole albums: check them)"

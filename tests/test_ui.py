@@ -615,7 +615,7 @@ def test_track_found_under_a_simpler_spelling_is_flagged_for_a_check(window, tmp
         cells(window, 0)["detail"] == 'saved as skone_afterlife.mp3, found by searching "Skone - Afterlife": check it'
     )
     assert cells(window, 1)["status"] == "Downloaded"
-    assert "2 downloaded (1 found under a simpler spelling: check them)" in window.summary_label.cget("text")
+    assert "2 downloaded (1 found by a looser search: check them)" in window.summary_label.cget("text")
 
 
 def test_window_messages_go_to_the_log_pane_and_the_log_file(window, tmp_path):

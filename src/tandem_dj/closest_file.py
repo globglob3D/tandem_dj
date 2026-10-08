@@ -25,6 +25,7 @@ from tandem_dj.search_variants import (
 )
 
 LINK_PREFIX = "slsk://"
+NOTHING_CLOSE_ENOUGH = "not found, and no file close enough came back from a broader search"
 LENGTH_TOLERANCE_SECONDS = 15
 MINIMUM_TITLE_COVERAGE = 0.75
 MINIMUM_ARTIST_COVERAGE = 0.5

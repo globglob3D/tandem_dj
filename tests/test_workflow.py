@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from tandem_dj import vpn, workflow
+from tandem_dj.closest_file import NOTHING_CLOSE_ENOUGH, SharedFile
 from tandem_dj.config import Settings, default_settings
 from tandem_dj.models import Track
 from tandem_dj.paths import bundled_sockseek, find_ffmpeg
@@ -16,6 +17,7 @@ from tandem_dj.progress import STATUS_DOWNLOADED, STATUS_FAILED, ProgressTracker
 from tandem_dj.sockseek import DownloadReport, SockseekDownloader, find_already_downloaded
 from tandem_dj.vpn import VPN_MODE_NONE, VisibleLocation
 from tandem_dj.workflow import (
+    CLOSEST_FILE_DESCRIPTION,
     LEVEL_ERROR,
     LEVEL_WARNING,
     DownloadCancelled,
@@ -675,6 +677,209 @@ def test_run_download_finds_tracks_under_simpler_spellings(tmp_path, monkeypatch
     assert sorted(settings.output_directory.iterdir()) == [strict_batch, relaxed_batch]
 
 
+@pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file(), reason="sockseek is not installed in vendor/sockseek")
+def test_run_download_takes_the_closest_file_of_a_broader_search(tmp_path, monkeypatch):
+    """
+    A track no spelling finds, because its file writes a word another way, is found by searching more broadly and
+    taking the closest file. It is reported as a match to check and skipped by the next run. A remix whose
+    original alone is shared stays not found.
+    """
+    monkeypatch.setattr(workflow, "lookup_visible_location", lambda: HOME_LOCATION)
+    shared_files = tmp_path / "shared"
+    (shared_files / "Klangkünstler" / "Engelsblut EP").mkdir(parents=True)
+    (shared_files / "Klangkünstler" / "Engelsblut EP" / "01 Engelsblut.mp3").write_bytes(b"not really audio")
+    (shared_files / "Klangkünstler" / "Engelsblut EP" / "02 Something Else.mp3").write_bytes(b"not really audio")
+    (shared_files / "Infectious - I Need Your Loving (Original Mix).mp3").write_bytes(b"not really audio")
+    (shared_files / "Infectious - I Need Somebody.mp3").write_bytes(b"not really audio")
+    (shared_files / "Wolfram feat Haddaway - My Love Is For Real.mp3").write_bytes(b"not really audio")
+    settings = dataclasses.replace(
+        make_settings(tmp_path, VPN_MODE_NONE),
+        extra_arguments=("--mock-files-dir", str(shared_files), "--mock-files-no-read-tags"),
+    )
+    labelled = Track(artists=("Klangkuenstler",), title="Engelsblut [CUT]")
+    misspelled = Track(artists=("Infectious!",), title="I Need Your Luvin'")
+    remix = Track(artists=("Wolfram & Haddaway",), title="My Love Is For Real (DJ Gigola Remix) [URAF01]")
+    tracks = [labelled, misspelled, remix]
+    notifications: list[str] = []
+    tracker = ProgressTracker(tracks)
+    broad_searches_made: list[dict[Track, list[str]]] = []
+    files_picked: list[dict[Track, str | None]] = []
+
+    def follow_broad_search(searches) -> None:
+        """
+        Record what is searched more broadly and let the tracker show it.
+
+        :param searches: What is searched for each track
+        """
+        broad_searches_made.append({track: list(queries) for track, queries in searches.items()})
+        tracker.follow_broad_search(searches)
+
+    def follow_closest_files(files) -> None:
+        """
+        Record the files picked and let the tracker follow their download.
+
+        :param files: File picked for each track, ``None`` when none is close enough
+        """
+        files_picked.append({track: file.file_name if file else None for track, file in files.items()})
+        tracker.follow_closest_files(files)
+
+    report = run_download(
+        settings,
+        tracks,
+        "broad",
+        batch_directory(tmp_path, "first"),
+        lambda message, level: notifications.append(message),
+        lambda question: True,
+        on_output_line=tracker.handle_line,
+        on_search_variants=tracker.follow_variants,
+        on_broad_search=follow_broad_search,
+        on_closest_files=follow_closest_files,
+    )
+    assert report.downloaded == [labelled, misspelled]
+    assert report.failed == [remix]
+    assert broad_searches_made == [
+        {
+            labelled: ["Engelsblut", "Klangkuenstler"],
+            misspelled: ["I Need Your Luvin", "Infectious"],
+            remix: ["My Love Is For Real Remix", "Wolfram"],
+        }
+    ]
+    assert files_picked == [
+        {remix: None},
+        {labelled: "01 Engelsblut.mp3", misspelled: "Infectious - I Need Your Loving (Original Mix).mp3"},
+    ]
+    assert report.relaxed_matches[labelled].query == "Engelsblut"
+    assert report.relaxed_matches[misspelled].query == "Infectious"
+    assert report.relaxed_matches[labelled].description == CLOSEST_FILE_DESCRIPTION
+    assert report.notes[remix] == NOTHING_CLOSE_ENOUGH
+    assert Path(report.saved_files[labelled]).name == "01 Engelsblut.mp3"
+    assert sorted(path.name for path in batch_directory(tmp_path, "first").iterdir()) == [
+        "01 Engelsblut.mp3",
+        "Infectious - I Need Your Loving (Original Mix).mp3",
+    ]
+    progress = {entry.track: entry for entry in tracker.snapshot()}
+    assert progress[labelled].status == STATUS_DOWNLOADED
+    assert progress[labelled].closest_file == "01 Engelsblut.mp3"
+    assert Path(progress[labelled].saved_path).name == "01 Engelsblut.mp3"
+    assert progress[misspelled].status == STATUS_DOWNLOADED
+    assert progress[remix].status == STATUS_FAILED
+    assert progress[remix].detail == NOTHING_CLOSE_ENOUGH
+    assert any(
+        'Klangkuenstler - Engelsblut [CUT]  ->  searching "Engelsblut" and "Klangkuenstler"' in message
+        for message in notifications
+    )
+    assert any("closest file: 01 Engelsblut.mp3, shared by local" in message for message in notifications)
+    found_message = next(message for message in notifications if message.startswith('Found by searching "Engelsblut"'))
+    assert "Check that it is the right track." in found_message
+
+    second_report = run_download(
+        settings,
+        tracks,
+        "broad",
+        batch_directory(tmp_path, "second"),
+        lambda message, level: None,
+        lambda question: True,
+    )
+    assert second_report.already_downloaded == [labelled, misspelled]
+    assert second_report.failed == [remix]
+    assert not batch_directory(tmp_path, "second").exists()
+
+
+def test_the_next_closest_file_is_tried_when_one_does_not_arrive(tmp_path, recording_downloader, monkeypatch):
+    """
+    When the closest file cannot be downloaded, the next closest is tried, a few times at most. Two tracks never
+    get files of the same name in one run, and files of a source skipped meanwhile are passed over.
+    """
+
+    class BroadDownloader(recording_downloader):
+        """
+        A downloader that finds nothing by name and answers broad searches with fixed files.
+
+        :param settings: User settings
+        """
+
+        file_runs: list[dict[Track, str]] = []
+
+        def download(self, tracks, name, keep_running=None, on_output_line=None) -> DownloadReport:
+            """
+            Report every track as not found.
+
+            :param tracks: Tracks to download
+            :param name: Unused
+            :param keep_running: Unused
+            :param on_output_line: Unused
+            :returns: A report where every track failed
+            """
+            return DownloadReport(failed=list(tracks))
+
+        def download_variants(self, variants, name, keep_running=None, on_output_line=None):
+            """
+            Find nothing under any spelling.
+
+            :param variants: Unused
+            :param name: Unused
+            :param keep_running: Unused
+            :param on_output_line: Unused
+            :returns: No file, and a run that was not stopped
+            """
+            return {}, False
+
+        def search(self, queries, name, keep_running=None, on_output_line=None):
+            """
+            Answer every search with the same files of four users.
+
+            :param queries: Searches to answer
+            :param name: Unused
+            :param keep_running: Unused
+            :param on_output_line: Unused
+            :returns: The files for each search, and a run that was not stopped
+            """
+            files = [
+                SharedFile(username=username, path=f"Music\\{name}.mp3")
+                for username in ("offline", "skipped", "online", "spare")
+                for name in ("Darude - Feel the Beat", "Daniel Avery - Naive Response")
+            ]
+            return {query: files for query in queries}, False
+
+        def download_files(self, files, name, keep_running=None, on_output_line=None):
+            """
+            Record the files asked for, skip a source after the first run, and only receive files of one user.
+
+            :param files: File to download for each track
+            :param name: Unused
+            :param keep_running: Unused
+            :param on_output_line: Unused
+            :returns: The files received, and a run that was not stopped
+            """
+            type(self).file_runs.append({track: file.username for track, file in files.items()})
+            self.skip_source("skipped")
+            saved_files = {
+                track: f"saved/{file.file_name}" for track, file in files.items() if file.username == "online"
+            }
+            return saved_files, False
+
+    BroadDownloader.file_runs = []
+    monkeypatch.setattr(workflow, "SockseekDownloader", BroadDownloader)
+    same_name = Track(artists=("Darude",), title="Feel the Beat (Live)")
+    hopeless = Track(artists=("Nobody Real",), title="Missing Song")
+    report = run_download(
+        make_settings(tmp_path, VPN_MODE_NONE),
+        [TRACK, OTHER_TRACK, hopeless, same_name],
+        "list",
+        batch_directory(tmp_path),
+        lambda message, level: None,
+        lambda question: True,
+    )
+    assert BroadDownloader.file_runs == [
+        {TRACK: "offline", OTHER_TRACK: "offline"},
+        {TRACK: "online", OTHER_TRACK: "online"},
+    ]
+    assert report.downloaded == [TRACK, OTHER_TRACK]
+    assert report.failed == [hopeless, same_name]
+    assert report.saved_files[TRACK] == "saved/Darude - Feel the Beat.mp3"
+    assert report.notes == {hopeless: NOTHING_CLOSE_ENOUGH, same_name: NOTHING_CLOSE_ENOUGH}
+
+
 def test_no_further_search_once_the_download_was_stopped(tmp_path, recording_downloader, monkeypatch):
     """
     Tracks left over by a download that was stopped are not searched again under other spellings.
@@ -709,6 +914,17 @@ def test_no_further_search_once_the_download_was_stopped(tmp_path, recording_dow
             :param on_output_line: Unused
             """
             pytest.fail("no further search may run after a stop")
+
+        def search(self, queries, name, keep_running=None, on_output_line=None):
+            """
+            Fail the test: no broad search may run either.
+
+            :param queries: Unused
+            :param name: Unused
+            :param keep_running: Unused
+            :param on_output_line: Unused
+            """
+            pytest.fail("no broad search may run after a stop")
 
     monkeypatch.setattr(workflow, "SockseekDownloader", StoppedDownloader)
     accented = Track(artists=("Sköne",), title="L'arrêt sur image")

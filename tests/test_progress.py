@@ -4,6 +4,7 @@ Tests of the live progress tracker, fed with events in the format sockseek reall
 
 import json
 
+from tandem_dj.closest_file import NOTHING_CLOSE_ENOUGH, SharedFile
 from tandem_dj.models import Track
 from tandem_dj.progress import (
     STATUS_ALREADY_DOWNLOADED,
@@ -471,6 +472,62 @@ def test_events_of_a_simpler_spelling_reach_the_track_it_stands_for():
     assert (found.status, found.saved_path) == (STATUS_DOWNLOADED, "D:/music/arret_sur_image.mp3")
     assert found.relaxed_query == "arret sur image"
     assert (untouched.status, untouched.relaxed_query) == (STATUS_WAITING, "")
+
+
+def test_events_naming_a_picked_file_update_the_track_it_was_picked_for():
+    """
+    A track searched more broadly shows what is searched; once a file is picked for it, the events sockseek prints
+    under the name of that file are about the track. A track nothing close enough came back for has failed.
+    """
+    tracker = ProgressTracker([AVERY, MISSING])
+    tracker.follow_broad_search({AVERY: ["Naive Response", "Daniel Avery"], MISSING: ["Missing Song"]})
+    searching, also_searching = tracker.snapshot()
+    assert (searching.status, also_searching.status) == (STATUS_SEARCHING, STATUS_SEARCHING)
+    assert searching.detail == 'searching more broadly: "Naive Response" and "Daniel Avery"'
+
+    picked_file = SharedFile(
+        username="someone", path="@@abc\\Music\\01 - Naive Responce (Daniel Avery).mp3", size=8_000_000
+    )
+    tracker.follow_closest_files({MISSING: None})
+    tracker.follow_closest_files({AVERY: picked_file})
+    waiting, failed = tracker.snapshot()
+    assert (waiting.status, waiting.closest_file) == (STATUS_WAITING, "01 - Naive Responce (Daniel Avery).mp3")
+    assert waiting.detail == "closest file found: 01 - Naive Responce (Daniel Avery).mp3, shared by someone"
+    assert (failed.status, failed.detail) == (STATUS_FAILED, NOTHING_CLOSE_ENOUGH)
+
+    tracker.handle_line(
+        event(
+            "download_start",
+            1,
+            title="01 - Naive Responce (Daniel Avery)",
+            username="someone",
+            filename=picked_file.path,
+            size=-1,
+        )
+    )
+    tracker.handle_line(event("download_progress", 2, jobId="job-1", bytesTransferred=2_000_000, totalBytes=8_000_000))
+    downloading = tracker.snapshot()[0]
+    assert downloading.status == STATUS_DOWNLOADING
+    assert downloading.sources == ("someone",)
+    assert (downloading.bytes_transferred, downloading.total_bytes, downloading.percent) == (2_000_000, 8_000_000, 25)
+    tracker.handle_line(
+        event(
+            "track_state",
+            3,
+            title="01 - Naive Responce (Daniel Avery)",
+            lifecycleState="Terminal",
+            terminalOutcome="Succeeded",
+            downloadPath="D:/music/Daniel Avery - Naive Response.mp3",
+            size=-1,
+        )
+    )
+    found = tracker.snapshot()[0]
+    assert (found.status, found.saved_path) == (STATUS_DOWNLOADED, "D:/music/Daniel Avery - Naive Response.mp3")
+    assert found.closest_file == "01 - Naive Responce (Daniel Avery).mp3"
+    assert (found.bytes_transferred, found.total_bytes) == (8_000_000, 8_000_000)
+
+    tracker.expect([AVERY])
+    assert tracker.snapshot()[0].closest_file == ""
 
 
 def test_remote_file_names_are_read_the_same_on_every_system():

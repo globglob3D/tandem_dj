@@ -68,8 +68,8 @@ What a download does, in order:
 2. **sockseek downloads** the tracks into a new folder (see
    [Where the files go](#where-the-files-go)). Only the first artist of a track is searched for (a Soulseek search
    needs every word to match a file path); the others appear in the notes column.
-3. **Tracks that were not found are searched again under simpler spellings** (see
-   [When a track is not found](#when-a-track-is-not-found)).
+3. **Tracks that were not found are searched again under simpler spellings**, then more broadly for the closest
+   file (see [When a track is not found](#when-a-track-is-not-found)).
 4. **Entries that are really whole albums are downloaded as albums** (see [Whole albums](#whole-albums)).
 5. **The VPN is disconnected again**, unless it was already on before the run.
 6. **Other formats are converted to MP3**: when a track only exists as FLAC, WAV, AIFF, M4A, OGG, Opus or another
@@ -179,13 +179,29 @@ as possible, and from round 4 only the word naming the version stays. `Glue (Ham
 searched as `Glue Remix`: the remixer is no longer named, but a remix is still what is asked for. The title is only
 searched alone when the length of the track is known or the title has at least three words.
 
-A looser search can return another recording than the one you wanted, so a track found this way is shown as
-**Downloaded - check** in amber, with the search that found it. When the length of the track is known (Spotify
-gives it), the file must still be within 3 seconds of it. The download history records the track under its real
-name, so it is not downloaded again.
+**Then the closest file of a broader search.** Every round above still needs each searched word in the name of the
+file, so one word written differently (`Lovin'` for `Loving`, a stray number, `ue` for `ü`) hides the track from
+all of them. For the tracks still missing, two broad searches are made, the title alone and the first artist
+alone, and Tandem DJ looks through everything that comes back for the file closest to the track. A file is only
+taken when:
 
-Each round costs one search per missing track. Switch the rounds off with the "Search tracks that are not found
-again under simpler spellings" setting.
+- its name holds the title, give or take one word in four and one letter in a word;
+- its name or its folders name the artist (unless the artist is unsure, as with an uploader's name);
+- its length is within 15 seconds of the track, when both are known;
+- it is the same kind of recording: a remix when you asked for a remix, and never a remix, a live or an
+  instrumental recording when you did not.
+
+Among the files that pass, the one naming the same remixer and the closest in length comes first. When it cannot be
+downloaded, the next closest is tried, three times at most. The `Details` column shows the file that was picked and
+who shares it.
+
+A looser search can return another recording than the one you wanted, so a track found in any of these ways is
+shown as **Downloaded - check** in amber, with the search that found it. In the rounds, when the length of the track
+is known (Spotify gives it), the file must still be within 3 seconds of it. The download history records the track
+under its real name, so it is not downloaded again.
+
+Each round costs one search per missing track, and the broader search two. Switch all of it off with the "Search
+tracks that are not found again" setting.
 
 ## When something goes wrong
 
@@ -216,6 +232,7 @@ What the `Details` column says about a track marked `Failed`:
 | Details | Meaning |
 | --- | --- |
 | `not found: nobody on Soulseek shares a file matching this search` | The search returned nothing at all, even under the simpler spellings. |
+| `not found, and no file close enough came back from a broader search` | Searching the title alone and the artist alone returned nothing that looks like this track: it is probably not shared, or under a very different name. |
 | `not found: 42 files came up but none fits (wrong length or format...)` | Files were found, but none is an audio file within 3 seconds of the expected length, or their owners keep them private. Often another version of the track. |
 | `found, but none of the 3 sources tried sent the file (...)` | The track exists and was found. sockseek asked each person sharing it in turn (up to 10), and each one refused, went offline or stayed silent, so nothing was received. The names in brackets are the people it asked. Right-click the track and choose **Download again** later (they may simply be offline or busy) or **Download from another source**. |
 

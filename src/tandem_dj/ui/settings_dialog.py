@@ -67,7 +67,7 @@ class SettingsDialog(tkinter.Toplevel):
         self._add_entry(form, "Preferred bitrate (kbps)", self.preferred_minimum_bitrate, hint="lower is a fallback")
         self._add_checkbox(
             form,
-            "Search tracks that are not found again under simpler spellings (no accents, no punctuation, title alone)",
+            "Search tracks that are not found again: simpler spellings, then the closest file of a broader search",
             self.relaxed_search,
         )
         self._add_checkbox(

@@ -10,8 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tandem_dj.album_search import AlbumSearch, album_searches, looks_like_album
+from tandem_dj.closest_file import NOTHING_CLOSE_ENOUGH, SharedFile, broad_searches, closest_files
 from tandem_dj.config import Settings
 from tandem_dj.conversion import ConversionError, convert_to_mp3, needs_conversion
+from tandem_dj.logs import write_log
 from tandem_dj.models import Track
 from tandem_dj.search_variants import SearchVariant, relaxed_search_variants
 from tandem_dj.sockseek import (
@@ -36,6 +38,9 @@ LEVEL_WARNING = "warning"
 LEVEL_ERROR = "error"
 
 STOPPED_EARLY_MESSAGE = "The download was stopped before the end."
+MAXIMUM_CLOSEST_FILE_ATTEMPTS = 3
+MAXIMUM_CLOSEST_FILES_LOGGED = 5
+CLOSEST_FILE_DESCRIPTION = "closest file among the results of a broader search"
 OWN_RESPONSIBILITY_QUESTION = (
     "Tandem DJ is not handling a VPN for this download.\n\n"
     "If you use a VPN, check that it is connected before you answer.\n\n"
@@ -59,6 +64,8 @@ SearchVariantsReceiver = Callable[[Mapping[Track, SearchVariant]], None]
 RequestReceiver = Callable[["TrackRequest"], None]
 AlbumSearchReceiver = Callable[[Track, AlbumSearch], None]
 AlbumResultReceiver = Callable[[Track, AlbumDownload | None], None]
+BroadSearchReceiver = Callable[[Mapping[Track, Sequence[str]]], None]
+ClosestFilesReceiver = Callable[[Mapping[Track, SharedFile | None]], None]
 
 
 def run_download(
@@ -76,15 +83,17 @@ def run_download(
     on_request: RequestReceiver | None = None,
     on_album_search: AlbumSearchReceiver | None = None,
     on_album_result: AlbumResultReceiver | None = None,
+    on_broad_search: BroadSearchReceiver | None = None,
+    on_closest_files: ClosestFilesReceiver | None = None,
 ) -> DownloadReport:
     """
     Download tracks into the folder of their batch with the protection chosen in the settings, then convert the
     files that are not MP3.
 
-    Tracks that are not found are searched again under simpler spellings, and the ones that look like a whole
-    album are then searched as an album, when the settings allow it. The requests queued in ``control`` meanwhile
-    are fulfilled before the protection ends, so that asking for one more track during a download costs no second
-    connection of the VPN.
+    Tracks that are not found are searched again under simpler spellings, then more broadly for the closest file,
+    and the ones that look like a whole album are then searched as an album, when the settings allow it. The
+    requests queued in ``control`` meanwhile are fulfilled before the protection ends, so that asking for one more
+    track during a download costs no second connection of the VPN.
 
     :param settings: User settings
     :param tracks: Tracks to download
@@ -102,6 +111,9 @@ def run_download(
     :param on_request: Told each request right before it is fulfilled
     :param on_album_search: Told which album an entry is about to be searched as
     :param on_album_result: Told how the search of an album ended: the album that was saved, or ``None``
+    :param on_broad_search: Told what is searched more broadly for each track that is still not found
+    :param on_closest_files: Told which file was picked for each of those tracks, ``None`` when none is close
+        enough, before the files are downloaded
     :returns: The outcome of every requested track, with converted file names
     :raises DownloadError: If sockseek or the download folder is not available
     :raises VpnError: If the VPN cannot be connected or confirmed
@@ -133,6 +145,8 @@ def run_download(
                     on_search_variants,
                     on_album_search,
                     on_album_result,
+                    on_broad_search,
+                    on_closest_files,
                 )
             )
             if report.stopped_early or control is None or (may_continue is not None and not may_continue()):
@@ -254,10 +268,13 @@ def fulfil_request(
     on_search_variants: SearchVariantsReceiver | None = None,
     on_album_search: AlbumSearchReceiver | None = None,
     on_album_result: AlbumResultReceiver | None = None,
+    on_broad_search: BroadSearchReceiver | None = None,
+    on_closest_files: ClosestFilesReceiver | None = None,
 ) -> DownloadReport:
     """
-    Download the tracks of one request: under their exact name, then under simpler spellings and as whole albums
-    when the settings allow it, from the sources the request prefers and never from the ones it avoids.
+    Download the tracks of one request: under their exact name, then under simpler spellings, through the closest
+    file of a broader search and as whole albums when the settings allow it, from the sources the request prefers
+    and never from the ones it avoids.
 
     When the request replaces files, the tracks that already have one are downloaded again. The earlier file of
     such a track is deleted once another one was downloaded, and stays the file of the track otherwise. A request
@@ -272,6 +289,8 @@ def fulfil_request(
     :param on_search_variants: Told which spelling each track is searched under, before every further search
     :param on_album_search: Told which album an entry is about to be searched as
     :param on_album_result: Told how the search of an album ended
+    :param on_broad_search: Told what is searched more broadly for each track that is still not found
+    :param on_closest_files: Told which file was picked for each of those tracks, before the files are downloaded
     :returns: The outcome of every track of the request
     """
     settings = downloader.settings
@@ -286,6 +305,9 @@ def fulfil_request(
             if settings.relaxed_search:
                 search_failed_tracks_again(
                     downloader, report, name, notify, keep_running, on_output_line, on_search_variants
+                )
+                search_more_broadly(
+                    downloader, report, name, notify, keep_running, on_output_line, on_broad_search, on_closest_files
                 )
             album_candidates = [track for track in report.failed if looks_like_album(track)]
             if not settings.album_search:
@@ -489,6 +511,139 @@ def _pick_searches(
             taken_keys.add(key)
             searches[track] = variant
     return searches
+
+
+def search_more_broadly(
+    downloader: SockseekDownloader,
+    report: DownloadReport,
+    name: str,
+    notify: Notify,
+    keep_running: Callable[[], bool] | None = None,
+    on_output_line: OutputLineReceiver | None = None,
+    on_broad_search: BroadSearchReceiver | None = None,
+    on_closest_files: ClosestFilesReceiver | None = None,
+) -> None:
+    """
+    Search the tracks that are still not found more broadly, and download the closest file of what comes back.
+
+    Sockseek runs once to list the files of every broad search, without downloading. The files that may be each
+    track are then picked by :func:`~tandem_dj.closest_file.closest_files`, and the best one is downloaded; when
+    it does not arrive, the next best is tried, a few times at most. Tracks found this way move from the failed to
+    the downloaded tracks of the report and are recorded as relaxed matches, because the file was chosen on its
+    name.
+
+    :param downloader: Downloader configured with the user settings
+    :param report: Outcome so far; updated in place
+    :param name: Name of the batch
+    :param notify: Receiver of progress messages
+    :param keep_running: Condition to keep searching; nothing starts once it returns ``False``
+    :param on_output_line: Receiver of every line sockseek prints
+    :param on_broad_search: Told what is searched for each track, before the search
+    :param on_closest_files: Told which file was picked for each track, ``None`` when none is close enough, before
+        the files are downloaded
+    """
+
+    def must_stop() -> bool:
+        """
+        Tell whether the download was stopped or may no longer go on.
+
+        :returns: ``True`` when nothing more should be started
+        """
+        return report.stopped_early or (keep_running is not None and not keep_running())
+
+    searches = {track: queries for track in report.failed if (queries := broad_searches(track))}
+    if not searches or must_stop():
+        return
+    notify(
+        f"Still not found: {len(report.failed)} tracks. Searching {len(searches)} of them more broadly, "
+        "to pick the closest file in what comes back...",
+        LEVEL_INFORMATION,
+    )
+    for track, queries in searches.items():
+        quoted_queries = " and ".join(f'"{query}"' for query in queries)
+        notify(f"  {track.display_name}  ->  searching {quoted_queries}", LEVEL_INFORMATION)
+    if on_broad_search is not None:
+        on_broad_search(searches)
+    every_query = list(dict.fromkeys(query for queries in searches.values() for query in queries))
+    results, stopped_early = downloader.search(every_query, name, keep_running, on_output_line)
+    report.stopped_early = report.stopped_early or stopped_early
+    candidates: dict[Track, deque[SharedFile]] = {}
+    query_of_file: dict[Track, dict[SharedFile, str]] = {}
+    for track, queries in searches.items():
+        query_of_file[track] = {}
+        for query in queries:
+            for file in results.get(query, []):
+                query_of_file[track].setdefault(file, query)
+        candidates[track] = deque(closest_files(track, query_of_file[track]))
+        closest_names = [f"{file.username}: {file.path}" for file in candidates[track]][:MAXIMUM_CLOSEST_FILES_LOGGED]
+        write_log(
+            f"Broad search for {track.display_name}: {len(query_of_file[track])} files came back, "
+            f"{len(candidates[track])} close enough. Closest: {closest_names}"
+        )
+    without_file = {track: None for track in searches if not candidates[track]}
+    for track in without_file:
+        report.notes[track] = NOTHING_CLOSE_ENOUGH
+    if on_closest_files is not None and without_file:
+        on_closest_files(without_file)
+    for attempt_number in range(MAXIMUM_CLOSEST_FILE_ATTEMPTS):
+        if must_stop():
+            return
+        chosen_files = _pick_files(report.failed, candidates, downloader.skipped_sources)
+        if not chosen_files:
+            return
+        for track, file in chosen_files.items():
+            again = ", after the one before did not arrive" if attempt_number else ""
+            notify(
+                f"  {track.display_name}  ->  closest file: {file.file_name}, shared by {file.username}{again}",
+                LEVEL_INFORMATION,
+            )
+        if on_closest_files is not None:
+            on_closest_files(chosen_files)
+        saved_files, stopped_early = downloader.download_files(chosen_files, name, keep_running, on_output_line)
+        for track, file_path in saved_files.items():
+            query = query_of_file[track][chosen_files[track]]
+            report.failed.remove(track)
+            report.downloaded.append(track)
+            report.saved_files[track] = file_path
+            report.relaxed_matches[track] = SearchVariant("", query, CLOSEST_FILE_DESCRIPTION)
+            notify(
+                f'Found by searching "{query}" and taking the closest file: {track.display_name}  ->  '
+                f"{Path(file_path).name}. Check that it is the right track.",
+                LEVEL_WARNING,
+            )
+        report.stopped_early = report.stopped_early or stopped_early
+
+
+def _pick_files(
+    failed_tracks: Sequence[Track], candidates: Mapping[Track, deque[SharedFile]], left_out_sources: Sequence[str]
+) -> dict[Track, SharedFile]:
+    """
+    Choose the file to download next for each track that is still missing, and take it out of its candidates.
+
+    Two files of the same name are never chosen for one run, since sockseek tells its downloads apart by the name
+    of the file; the second track waits for the next run. Files of users left out meanwhile are dropped.
+
+    :param failed_tracks: Tracks still missing
+    :param candidates: Files that may be each track, best first; updated in place
+    :param left_out_sources: Soulseek users no file should be taken from
+    :returns: The file to download for each track that has one left
+    """
+    chosen_files: dict[Track, SharedFile] = {}
+    taken_names: set[tuple[str, str]] = set()
+    for track in failed_tracks:
+        files = candidates.get(track)
+        while files:
+            file = files.popleft()
+            if file.username in left_out_sources:
+                continue
+            name_key = track_key("", file.stem)
+            if name_key in taken_names:
+                files.appendleft(file)
+            else:
+                chosen_files[track] = file
+                taken_names.add(name_key)
+            break
+    return chosen_files
 
 
 def _settle_replaced_files(

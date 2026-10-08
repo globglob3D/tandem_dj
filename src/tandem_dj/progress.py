@@ -4,11 +4,12 @@ Live download progress, rebuilt from the JSON events sockseek prints with ``--pr
 
 import json
 import threading
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import PureWindowsPath
 
+from tandem_dj.closest_file import NOTHING_CLOSE_ENOUGH, SharedFile
 from tandem_dj.models import Track
 from tandem_dj.search_variants import SearchVariant
 from tandem_dj.text_cleaning import track_key
@@ -94,7 +95,7 @@ class ProgressTracker:
                 self._entry_by_job = {job: other for job, other in self._entry_by_job.items() if other is not entry}
                 entry.is_followed = True
                 entry.status, entry.detail, entry.relaxed_query, entry.saved_path = STATUS_WAITING, detail, "", ""
-                entry.album_query = ""
+                entry.album_query, entry.closest_file = "", ""
                 entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
                 entry.progress_at = None
 
@@ -113,9 +114,51 @@ class ProgressTracker:
                 if entry is None:
                     continue
                 self._entry_by_variant[track_key(variant.artist, variant.title)] = entry
-                entry.status, entry.relaxed_query = STATUS_WAITING, variant.query
+                entry.status, entry.relaxed_query, entry.closest_file = STATUS_WAITING, variant.query, ""
                 entry.detail = f'searching again as "{variant.query}"'
                 entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
+
+    def follow_broad_search(self, searches: Mapping[Track, Sequence[str]]) -> None:
+        """
+        Show that some tracks are being searched more broadly, to pick the closest file in what comes back.
+
+        :param searches: What is searched for each track
+        """
+        with self._lock:
+            for track, queries in searches.items():
+                entry = self._entries.get(track_key(track.primary_artist, track.title))
+                if entry is None:
+                    continue
+                quoted_queries = " and ".join(f'"{query}"' for query in queries)
+                entry.status, entry.relaxed_query, entry.closest_file = STATUS_SEARCHING, "", ""
+                entry.detail = f"searching more broadly: {quoted_queries}"
+                entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
+
+    def follow_closest_files(self, files: Mapping[Track, SharedFile | None]) -> None:
+        """
+        Expect the next events to be about files picked among the results of a broad search.
+
+        Sockseek names such a download after the file, so events naming a file are applied to the track the file
+        was picked for. It does not announce the size of such a download, so the size the search gave is kept: it
+        is what attaches the transfer progress to the track. A track for which nothing close enough came back has
+        failed.
+
+        :param files: File about to be downloaded for each track, ``None`` when none is close enough
+        """
+        with self._lock:
+            self._entry_by_variant = {}
+            for track, file in files.items():
+                entry = self._entries.get(track_key(track.primary_artist, track.title))
+                if entry is None:
+                    continue
+                entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
+                if file is None:
+                    entry.status, entry.detail = STATUS_FAILED, NOTHING_CLOSE_ENOUGH
+                    continue
+                self._entry_by_variant[track_key("", file.stem)] = entry
+                self._entry_by_job = {job: other for job, other in self._entry_by_job.items() if other is not entry}
+                entry.status, entry.closest_file, entry.total_bytes = STATUS_WAITING, file.file_name, file.size
+                entry.detail = f"closest file found: {file.file_name}, shared by {file.username}"
 
     def follow_album(self, track: Track, query: str) -> None:
         """
@@ -134,6 +177,7 @@ class ProgressTracker:
             self._album_entry, self._album_file_sizes, self._album_files_received = entry, {}, set()
             entry.is_followed = True
             entry.status, entry.album_query, entry.relaxed_query = STATUS_SEARCHING, query, ""
+            entry.closest_file = ""
             entry.detail = f'not found as a song, searching for the album "{query}"'
             entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
 
@@ -249,7 +293,9 @@ class ProgressTracker:
                 source = str(data.get("username") or "")
                 if source and source not in entry.sources:
                     entry.sources += (source,)
-                entry.total_bytes = int(data.get("size") or 0)
+                announced_size = int(data.get("size") or 0)
+                if announced_size > 0 or not entry.closest_file:
+                    entry.total_bytes = max(announced_size, 0)
                 entry.bytes_transferred, entry.speed_bytes_per_second, entry.progress_at = 0, 0.0, None
         elif event_type == "download_progress":
             self._apply_download_progress(data, event_time)
@@ -309,7 +355,7 @@ class ProgressTracker:
         if outcome == "Succeeded":
             entry.status = STATUS_DOWNLOADED
             entry.saved_path = str(description.get("downloadPath") or "")
-            entry.total_bytes = int(description.get("size") or entry.total_bytes)
+            entry.total_bytes = max(int(description.get("size") or 0), 0) or entry.total_bytes
             entry.bytes_transferred = entry.total_bytes
             bitrate = description.get("bitRate")
             entry.detail = f"{description.get('extension', '')} {bitrate} kbps".strip() if bitrate else ""
@@ -382,6 +428,8 @@ class TrackProgress:
     :param speed_bytes_per_second: Current transfer speed
     :param saved_path: Path the file was saved to, empty until the track is downloaded
     :param relaxed_query: Simpler spelling the track is or was last searched under, empty for the exact search
+    :param closest_file: Name of the file picked for the track among the results of a broad search, empty when
+        the track is or was downloaded another way
     :param album_query: Album the entry is or was last searched as, empty when it was only searched as a song
     :param sources: Soulseek users a transfer of this track was started from, in the order they were tried
     :param is_followed: Whether the track is part of the run being followed
@@ -396,6 +444,7 @@ class TrackProgress:
     speed_bytes_per_second: float = 0.0
     saved_path: str = ""
     relaxed_query: str = ""
+    closest_file: str = ""
     album_query: str = ""
     sources: tuple[str, ...] = ()
     is_followed: bool = True

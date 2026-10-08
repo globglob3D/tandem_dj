@@ -505,8 +505,8 @@ class DownloadReport:
     :param failed: Tracks sockseek could not find or could not finish downloading
     :param not_attempted: Tracks sockseek did not finish with, typically because the run was interrupted
     :param saved_files: Path each downloaded or already downloaded track was saved to, as recorded by sockseek
-    :param relaxed_matches: Spelling that found each track which was not found under its exact name; such files
-        deserve a check by the user
+    :param relaxed_matches: Search that found each track which was not found under its exact name, whether a
+        simpler spelling or a broad search whose closest file was taken; such files deserve a check by the user
     :param notes: What else there is to tell the user about a track, shown in place of the usual details
     :param albums: Album saved for each entry that was downloaded as a whole album; ``saved_files`` holds its
         folder
