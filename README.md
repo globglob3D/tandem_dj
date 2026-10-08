@@ -120,7 +120,7 @@ Select one or more tracks (Ctrl or Shift click for several, Ctrl+A for all) and 
 | **Download from another source** | Downloads the selected tracks from other people than the ones already tried for them: the next best source. Use it when a file is a bad rip or the wrong version, or when its source never answers. Only available once Tandem DJ knows who was tried, which it remembers from one launch to the next. With several tracks selected, the people tried for any of them are avoided for all of them. |
 | **Download as an album** | Searches each selected track as an album and downloads every song of it (see [Whole albums](#whole-albums)). For a track read from Spotify, that is the album the track is on. |
 | **Leave this source now** | During a download, for a track stuck at 0 kB/s: gives up the person it is being transferred from, for every track. sockseek cannot change source while it runs, so it is restarted on the tracks that are not downloaded yet; the other transfers in progress start over, finished tracks are kept. |
-| **Show the file in its folder** | Opens the folder of the track with its file selected. |
+| **Show the file in its folder** | Opens the folder of the track with its file selected, in your file manager. On Windows that is the program you made the default for folders (File Pilot, XYplorer...), and Explorer when you chose none. |
 | **Copy artist and title** | Copies the selected tracks as `Artist - Title` lines. |
 | **Select every track that is not downloaded** | Selects what failed or was not finished, ready for one of the entries above. |
 

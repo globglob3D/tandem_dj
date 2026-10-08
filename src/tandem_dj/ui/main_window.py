@@ -16,9 +16,10 @@ from types import TracebackType
 from tandem_dj.batch_folder import batch_folder_name
 from tandem_dj.config import ConfigurationError, Settings, default_settings, load_settings
 from tandem_dj.diagnostics import describe_setup
+from tandem_dj.file_manager import open_folder, show_in_folder
 from tandem_dj.logs import current_log_path, hide_secret, write_error_log, write_log
 from tandem_dj.models import TEXT_ORIGIN, Track, TrackCollection
-from tandem_dj.paths import APPLICATION_NAME, log_directory, open_folder, show_in_folder
+from tandem_dj.paths import APPLICATION_NAME, log_directory
 from tandem_dj.progress import (
     STATUS_ALREADY_DOWNLOADED,
     STATUS_DOWNLOADED,

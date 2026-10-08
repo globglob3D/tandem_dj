@@ -7,7 +7,6 @@ Shipped files (sockseek, the icon) are read-only and live next to the code. Ever
 
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -140,32 +139,3 @@ def default_output_directory() -> Path:
     :returns: ``Music/Tandem DJ`` in the home folder
     """
     return Path.home() / "Music" / APPLICATION_NAME
-
-
-def open_folder(folder: Path) -> None:
-    """
-    Show a folder in the file manager of the operating system.
-
-    :param folder: Folder to show, created when missing
-    :raises OSError: If the file manager cannot be started
-    """
-    folder.mkdir(parents=True, exist_ok=True)
-    if sys.platform == "win32":
-        os.startfile(folder)
-    else:
-        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(folder)])
-
-
-def show_in_folder(path: Path) -> None:
-    """
-    Show a file or a folder in the file manager of the operating system, selected inside the folder holding it.
-
-    :param path: File or folder to show
-    :raises OSError: If the file manager cannot be started
-    """
-    if sys.platform == "win32":
-        subprocess.Popen(["explorer", f"/select,{path}"])
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", "-R", str(path)])
-    else:
-        subprocess.Popen(["xdg-open", str(path.parent)])

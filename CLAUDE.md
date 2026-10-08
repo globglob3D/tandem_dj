@@ -28,6 +28,7 @@ uv run python scripts/smoke_test.py  # start the built application and check its
 src/tandem_dj/
   app.py             main(): starts logging, opens the window, shows a system message box if that fails
   paths.py           user data folder, shipped files (sockseek, ffmpeg, assets), per-system defaults
+  file_manager.py    show_in_folder(), open_folder(): a file or a folder shown in the file manager of the user
   logs.py            one log file per launch, secrets masked, uncaught exceptions of every thread recorded
   diagnostics.py     describe_setup(): the description of the setup written at the top of every log
   workflow.py        run_download(): VPN + sockseek + conversion; TrackRequest, DownloadControl
@@ -167,6 +168,17 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
   move as their status changes; `#` gives the order of the track list back. `sort_value()` reads quantities
   (length, size, speed, time left, percentage) from the text of the cells, so they sort as numbers. Empty cells
   come last in both directions.
+- **"Show the file in its folder" goes to the file manager the user chose** (`file_manager.show_in_folder()`).
+  On Windows, `registered_folder_command()` reads the command registered to open folders
+  (`HKEY_CLASSES_ROOT\Directory\shell\<default verb, else open>\command`), which File Pilot and XYplorer take
+  over when made the default; the file is handed to that command in place of its `%1`. Measured with File Pilot
+  0.8.3: handed a file, it opens the folder holding it with the file selected. Without such a command, or when
+  it cannot be started, Explorer is run as `explorer /select,"<path>"`, a command line written as text.
+  Measured: with the quotes around the whole option (`"/select,<path>"`, which is what a list of arguments
+  gives as soon as the path holds a space), Explorer opens the Documents folder instead; with the quotes
+  around the path alone, spaces, commas and semicolons in the path are fine. The path is made absolute first,
+  which also turns the forward slashes of the sockseek index into backslashes. Every command run is in the log
+  file. `open_folder()` uses `os.startfile()`, which already follows the registered program.
 - `_log()` writes to the log file as well as the log pane. `write_log()` alone records details that would clutter
   the pane, such as the full list of tracks sent.
 - Closing the window during a download stops sockseek first and waits for the worker, so the VPN guard always
@@ -495,11 +507,14 @@ columns, whole albums, failures explained in plain words, the setting for silent
 whole playlist behind a YouTube video link. 0.7.0, released on 2026-10-08, made tracks from YouTube easier to
 find: titles written `Artist : Title` or `Artist / Title` are split, the relaxed search drops what titles hold in
 brackets step by step while keeping the word naming a version, and the closest file of a broader search is taken
-for tracks no spelling finds. What is known to work and what is not:
+for tracks no spelling finds. Since 0.7.0, not released yet: "Show the file in its folder" opens the file manager
+the user made the default on Windows, and Explorer on the right folder otherwise. What is known to work and what
+is not:
 
-- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (315
-  tests, none skipped, including the offline runs of the real sockseek and the hidden-window tests), the build, and
-  the smoke test showing that the packaged application starts and that the sockseek and ffmpeg packed inside answer.
+- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (333
+  tests, including the offline runs of the real sockseek and the hidden-window tests; the one reading the Windows
+  registry is skipped on macOS), the build, and the smoke test showing that the packaged application starts and
+  that the sockseek and ffmpeg packed inside answer.
 - **Checked by hand on Windows**: the setup program installs, starts and uninstalls; a whole download driven through
   the real window against sockseek's mock mode (exact search, relaxed search, M4A conversion, password masked in
   the log), and three downloads in a row landing in their own folders (a text file, typed tracks, and one with
@@ -507,6 +522,8 @@ for tracks no spelling finds. What is known to work and what is not:
   mock mode: a track downloaded again and replaced, another source asked when there is none (the file is kept), a
   request queued during a download and fulfilled by it, a source left during a slow download, and a track asked
   as an album with its live file count. The two YouTube links the user reported read their 46 videos.
+  `show_in_folder()` run for real on a file whose path holds spaces, a comma and a semicolon: File Pilot (the
+  default of the author's machine) and Explorer both opened its folder with the file selected.
 - **Never checked**: what the window looks like on a Mac (fonts, the `clam` theme, dialogs, the right-click menu,
   which is opened by a secondary click or Control-click there), the first-launch steps on macOS described in
   `README.md`, and `piactl` at `/usr/local/bin/piactl`. The relaxed search, the album search and the options that
@@ -519,7 +536,10 @@ for tracks no spelling finds. What is known to work and what is not:
   `--print json-all` prints (other fields, how many files a broad search such as an artist alone returns before
   Soulseek cuts it), links to users whose name holds spaces or signs, and whether its thresholds pick the right
   file are all unknown. Each track still missing costs two more searches, against Soulseek's limit of 34 per
-  220 seconds that sockseek paces itself to.
+  220 seconds that sockseek paces itself to. "Show the file in its folder" was only run with File Pilot and
+  Explorer: what XYplorer or another file manager does when its folder command is handed a file (select it, as
+  expected, or open it) is not measured, nor are file managers that replace Explorer without registering a
+  command under `Directory\shell`.
 
 Ideas that were mentioned and not started: preparing files for rekordbox; using the BPM and key Spotify returns;
 code signing to remove the first-launch warnings; telling the user when a newer version exists; exporting a track
