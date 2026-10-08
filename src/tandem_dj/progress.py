@@ -95,7 +95,7 @@ class ProgressTracker:
                 self._entry_by_job = {job: other for job, other in self._entry_by_job.items() if other is not entry}
                 entry.is_followed = True
                 entry.status, entry.detail, entry.relaxed_query, entry.saved_path = STATUS_WAITING, detail, "", ""
-                entry.album_query, entry.closest_file = "", ""
+                entry.album_query, entry.closest_file, entry.soulseek_path = "", "", ""
                 entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
                 entry.progress_at = None
 
@@ -116,6 +116,7 @@ class ProgressTracker:
                 self._entry_by_variant[track_key(variant.artist, variant.title)] = entry
                 entry.status, entry.relaxed_query, entry.closest_file = STATUS_WAITING, variant.query, ""
                 entry.detail = f'searching again as "{variant.query}"'
+                entry.soulseek_path = ""
                 entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
 
     def follow_broad_search(self, searches: Mapping[Track, Sequence[str]]) -> None:
@@ -132,6 +133,7 @@ class ProgressTracker:
                 quoted_queries = " and ".join(f'"{query}"' for query in queries)
                 entry.status, entry.relaxed_query, entry.closest_file = STATUS_SEARCHING, "", ""
                 entry.detail = f"searching more broadly: {quoted_queries}"
+                entry.soulseek_path = ""
                 entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
 
     def follow_closest_files(self, files: Mapping[Track, SharedFile | None]) -> None:
@@ -152,6 +154,7 @@ class ProgressTracker:
                 if entry is None:
                     continue
                 entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
+                entry.soulseek_path = ""
                 if file is None:
                     entry.status, entry.detail = STATUS_FAILED, NOTHING_CLOSE_ENOUGH
                     continue
@@ -178,7 +181,7 @@ class ProgressTracker:
             self._album_entry, self._album_file_sizes, self._album_files_received = entry, {}, set()
             entry.is_followed = True
             entry.status, entry.album_query, entry.relaxed_query = STATUS_SEARCHING, query, ""
-            entry.closest_file = ""
+            entry.closest_file, entry.soulseek_path = "", ""
             entry.detail = f'not found as a song, searching for the album "{query}"'
             entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
 
@@ -201,7 +204,7 @@ class ProgressTracker:
                 entry.bytes_transferred = entry.total_bytes
                 entry.detail = f"album of {file_count} files"
             else:
-                entry.status = STATUS_FAILED
+                entry.status, entry.soulseek_path = STATUS_FAILED, ""
                 entry.detail = f'not found as a song, and no album "{entry.album_query}" could be downloaded'
 
     def snapshot(self) -> list["TrackProgress"]:
@@ -290,7 +293,8 @@ class ProgressTracker:
             if entry is not None:
                 self._entry_by_job = {job: other for job, other in self._entry_by_job.items() if other is not entry}
                 entry.status = STATUS_DOWNLOADING
-                entry.detail = f"from {data.get('username', '?')}: {remote_file_name(str(data.get('filename', '')))}"
+                entry.soulseek_path = str(data.get("filename") or "")
+                entry.detail = f"from {data.get('username', '?')}: {entry.soulseek_name}"
                 source = str(data.get("username") or "")
                 if source and source not in entry.sources:
                     entry.sources += (source,)
@@ -322,10 +326,10 @@ class ProgressTracker:
             return
         entry.total_bytes = sum(self._album_file_sizes.values())
         entry.bytes_transferred = sum(self._album_file_sizes[name] for name in self._album_files_received)
-        folder_name = PureWindowsPath(file_name).parent.name
+        entry.soulseek_path = str(PureWindowsPath(file_name).parent)
         source_name = entry.sources[-1] if entry.sources else "?"
         entry.detail = (
-            f"album from {source_name}: {folder_name} "
+            f"album from {source_name}: {entry.soulseek_name} "
             f"({len(self._album_files_received)} of {len(self._album_file_sizes)} files)"
         )
 
@@ -338,7 +342,7 @@ class ProgressTracker:
         """
         if entry.status == STATUS_WAITING:
             return
-        entry.status, entry.detail = STATUS_WAITING, "starting again"
+        entry.status, entry.detail, entry.soulseek_path = STATUS_WAITING, "starting again", ""
         entry.bytes_transferred, entry.total_bytes, entry.speed_bytes_per_second = 0, 0, 0.0
         entry.progress_at = None
 
@@ -356,6 +360,7 @@ class ProgressTracker:
         if outcome == "Succeeded":
             entry.status = STATUS_DOWNLOADED
             entry.saved_path = str(description.get("downloadPath") or "")
+            entry.soulseek_path = str(description.get("filename") or "") or entry.soulseek_path
             entry.total_bytes = max(int(description.get("size") or 0), 0) or entry.total_bytes
             entry.bytes_transferred = entry.total_bytes
             bitrate = description.get("bitRate")
@@ -363,7 +368,7 @@ class ProgressTracker:
         elif outcome == "Skipped":
             entry.status, entry.detail = STATUS_ALREADY_DOWNLOADED, ""
         else:
-            entry.status = STATUS_FAILED
+            entry.status, entry.soulseek_path = STATUS_FAILED, ""
             entry.detail = describe_failure(
                 str(description.get("failureReason") or outcome or "unknown reason"),
                 entry.sources,
@@ -428,6 +433,8 @@ class TrackProgress:
     :param total_bytes: Size of the file being received, ``0`` when unknown
     :param speed_bytes_per_second: Current transfer speed
     :param saved_path: Path the file was saved to, empty until the track is downloaded
+    :param soulseek_path: Path the file being received, or received, has on Soulseek, where its owner named it;
+        the shared folder for an album. Empty when no file is being received and none was
     :param relaxed_query: Simpler spelling the track is or was last searched under, empty for the exact search
     :param closest_file: Name of the file picked for the track among the results of a broad search, empty when
         the track is or was downloaded another way
@@ -444,12 +451,23 @@ class TrackProgress:
     total_bytes: int = 0
     speed_bytes_per_second: float = 0.0
     saved_path: str = ""
+    soulseek_path: str = ""
     relaxed_query: str = ""
     closest_file: str = ""
     album_query: str = ""
     sources: tuple[str, ...] = ()
     is_followed: bool = True
     progress_at: datetime | None = field(default=None, repr=False)
+
+    @property
+    def soulseek_name(self) -> str:
+        """
+        Tell what the file being received, or received, is named on Soulseek, whatever it is saved as.
+
+        :returns: The file name its owner gave it, or the name of the shared folder for an album; empty when
+            no file is being received and none was
+        """
+        return remote_file_name(self.soulseek_path)
 
     @property
     def percent(self) -> int | None:

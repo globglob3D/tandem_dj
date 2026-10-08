@@ -149,6 +149,64 @@ def test_search_download_and_success():
     assert entry.seconds_left is None
 
 
+def test_the_name_a_file_has_on_soulseek_is_kept_while_it_is_received_and_afterwards():
+    """
+    The path a file is shared under is known as soon as its transfer starts and stays once the file is saved under
+    another name. A track that fails, starts over or is asked again has no such file any more.
+    """
+    tracker = make_tracker()
+    shared_path = "@@abc\\Techno\\Song For Alpha (2018)\\02. naive_response.flac"
+    tracker.handle_line(
+        event(
+            "download_start", 12.0, artist="Daniel Avery", title="Naive Response", username="peer", filename=shared_path
+        )
+    )
+    receiving = tracker.snapshot()[0]
+    assert (receiving.soulseek_path, receiving.soulseek_name) == (shared_path, "02. naive_response.flac")
+    tracker.handle_line(
+        event(
+            "track_state",
+            16.0,
+            artist="Daniel Avery",
+            title="Naive Response",
+            lifecycleState="Terminal",
+            terminalOutcome="Succeeded",
+            downloadPath="D:\\music\\Daniel Avery - Naive Response.flac",
+        )
+    )
+    assert tracker.snapshot()[0].soulseek_name == "02. naive_response.flac"
+
+    tracker.handle_line(
+        event(
+            "track_state",
+            17.0,
+            artist="Darude",
+            title="Feel the Beat",
+            lifecycleState="Terminal",
+            terminalOutcome="Succeeded",
+            filename="music\\darude - feel the beat.mp3",
+        )
+    )
+    assert tracker.snapshot()[1].soulseek_name == "darude - feel the beat.mp3"
+
+    for second, ending in (
+        (20.0, {"type": "track_state", "lifecycleState": "Terminal", "terminalOutcome": "Failed"}),
+        (30.0, {"type": "track_list", "lifecycleState": "Pending", "terminalOutcome": "None"}),
+    ):
+        tracker.handle_line(
+            event("download_start", second, artist="Nobody Real", title="Missing Song", filename="music\\song.mp3")
+        )
+        assert tracker.snapshot()[2].soulseek_name == "song.mp3"
+        description = {"artist": "Nobody Real", "title": "Missing Song", **ending}
+        event_type = description.pop("type")
+        data = {"tracks": [description]} if event_type == "track_list" else description
+        tracker.handle_line(event(event_type, second + 5, **data))
+        assert tracker.snapshot()[2].soulseek_path == ""
+
+    tracker.expect([AVERY])
+    assert tracker.snapshot()[0].soulseek_path == ""
+
+
 def test_progress_is_matched_to_the_right_track_by_file_size():
     """
     Transfer events name a job, not a track: each job is attached to the downloading track of the same size.
@@ -356,12 +414,14 @@ def test_the_files_of_an_album_count_towards_the_entry_it_stands_for():
     album_entry, song_entry = tracker.snapshot()
     assert (album_entry.status, album_entry.percent, album_entry.sources) == (STATUS_DOWNLOADING, 50, ("collector",))
     assert album_entry.detail == "album from collector: Boards of Canada - Geogaddi (2002) (1 of 2 files)"
+    assert album_entry.soulseek_path == "music\\Boards of Canada - Geogaddi (2002)"
     assert song_entry.status == STATUS_WAITING
 
     tracker.finish_album(long_video, "D:/music/Boards of Canada - Geogaddi (2002)", 2)
     album_entry = tracker.snapshot()[0]
     assert (album_entry.status, album_entry.percent, album_entry.detail) == (STATUS_DOWNLOADED, 100, "album of 2 files")
     assert album_entry.saved_path == "D:/music/Boards of Canada - Geogaddi (2002)"
+    assert album_entry.soulseek_name == "Boards of Canada - Geogaddi (2002)"
 
     tracker.handle_line(event("search_start", 30.0, artist="Boards of Canada", title="Gyroscope"))
     assert tracker.snapshot()[1].status == STATUS_SEARCHING
@@ -510,6 +570,7 @@ def test_events_naming_a_picked_file_update_the_track_it_was_picked_for():
     downloading = tracker.snapshot()[0]
     assert downloading.status == STATUS_DOWNLOADING
     assert downloading.sources == ("someone",)
+    assert downloading.soulseek_path == picked_file.path
     assert (downloading.bytes_transferred, downloading.total_bytes, downloading.percent) == (2_000_000, 8_000_000, 25)
     tracker.handle_line(
         event(
@@ -525,10 +586,11 @@ def test_events_naming_a_picked_file_update_the_track_it_was_picked_for():
     found = tracker.snapshot()[0]
     assert (found.status, found.saved_path) == (STATUS_DOWNLOADED, "D:/music/Daniel Avery - Naive Response.mp3")
     assert found.closest_file == "01 - Naive Responce (Daniel Avery).mp3"
+    assert found.soulseek_name == "01 - Naive Responce (Daniel Avery).mp3"
     assert (found.bytes_transferred, found.total_bytes) == (8_000_000, 8_000_000)
 
     tracker.expect([AVERY])
-    assert tracker.snapshot()[0].closest_file == ""
+    assert (tracker.snapshot()[0].closest_file, tracker.snapshot()[0].soulseek_path) == ("", "")
 
 
 def test_remote_file_names_are_read_the_same_on_every_system():

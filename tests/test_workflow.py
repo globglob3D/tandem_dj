@@ -591,6 +591,7 @@ def test_run_download_reports_progress_and_converts_other_formats(tmp_path, monk
     assert report.downloaded == [found]
     assert report.failed == [missing]
     assert [entry.status for entry in tracker.snapshot()] == [STATUS_DOWNLOADED, STATUS_FAILED]
+    assert [entry.soulseek_name for entry in tracker.snapshot()] == ["Test Artist - Test Tone.flac", ""]
     assert Path(report.saved_files[found]).name == "Test Artist - Test Tone.mp3"
     assert Path(report.saved_files[found]).parent == batch_directory(tmp_path)
     assert [path.name for path in batch_directory(tmp_path).iterdir()] == ["Test Artist - Test Tone.mp3"]
