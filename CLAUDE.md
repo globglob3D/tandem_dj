@@ -43,6 +43,7 @@ src/tandem_dj/
   models.py          Track, TrackCollection
   text_cleaning.py   upload title cleaning and "Artist - Title" splitting (shared by YouTube, SoundCloud, text)
   search_variants.py relaxed_search_variants(): simpler spellings of a track that was not found
+  closest_file.py    broad_searches(), closest_files(): the likeliest file among the results of a broad search
   album_search.py    looks_like_album(), album_searches(): entries that may be whole albums and what to search
   sockseek.py        SockseekDownloader: CSV input file, command line, report from the sockseek index
   vpn.py             VPN modes; VpnGuard (Private Internet Access through piactl), AddressWatch (no VPN handled)

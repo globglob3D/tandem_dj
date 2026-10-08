@@ -173,6 +173,16 @@ def strip_bracketed_text(title: str) -> str:
     return normalize_text(stripped) or title
 
 
+def version_words(text: str) -> list[str]:
+    """
+    List the words of a title or of a file name that name a version, such as ``remix``, ``dub`` or ``live``.
+
+    :param text: Any text
+    :returns: Those words in lowercase, in the order they appear
+    """
+    return [word.casefold() for word in _VERSION_WORD.findall(text)]
+
+
 def _keep_version_words(match: re.Match[str]) -> str:
     """
     Decide what replaces one bracketed group while stripping bracketed text.
