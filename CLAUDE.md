@@ -268,12 +268,18 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
   path, with backslashes), `File.Length` and `File.Size`. The rows carry no `Length`, so sockseek filters nothing
   by length. When the number of lists differs from the number of searches, every answer is dropped.
 - `closest_file.closest_files(track, files)` keeps a file only when its name holds at least three quarters of the
-  words of the title, when its path names at least half of the words of the artist (if the artist is sure), when
+  words of the title, when its path names the artist (if the artist is sure), when
   its length is within 15 seconds (if both are known), and when it is the same kind of recording
   (`OTHER_RECORDING_WORDS`: a remix when one is wanted, never a remix, a live or an instrumental otherwise). Two
   words are the same give or take a letter (`MINIMUM_WORD_SIMILARITY`). The files kept are sorted by a score in
   which the remixer and label named in brackets and the length only count as preferences. **The rules decide
   what is acceptable, the score only ranks**: do not turn the score into a threshold.
+- **A path names the artist when one of its parts does**: a folder name or the file name has to hold at least
+  three quarters of the words of the first artist (`first_artist()`), so every word of a name of one to three
+  words, and all but one of a longer name (`Cherry Moon trax 1` against `Cherry Moon Trax`). The user asked for
+  this strictness: the song of another artist must end as `Failed`, not as `Downloaded - check`. Half of the
+  words anywhere in the path let `Hd Substance` be named by a folder called `FLAC HD`. The broad search of the
+  title alone stays, as a way to list files: none of them is taken without the artist in its path.
 - `SockseekDownloader.download_files()` downloads the chosen files in one run, from a list file of quoted
   `slsk://user/path` links (`--input-type list`), with an index of its own, then `record_downloads()` marks the
   tracks in the history under their real name. Measured in mock mode: **sockseek decodes the link**, so a `+`

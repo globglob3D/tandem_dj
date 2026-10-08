@@ -27,7 +27,7 @@ LINK_PREFIX = "slsk://"
 NOTHING_CLOSE_ENOUGH = "not found, and no file close enough came back from a broader search"
 LENGTH_TOLERANCE_SECONDS = 15
 MINIMUM_TITLE_COVERAGE = 0.75
-MINIMUM_ARTIST_COVERAGE = 0.5
+MINIMUM_ARTIST_COVERAGE = 0.75
 MINIMUM_WORD_SIMILARITY = 0.85
 MINIMUM_LETTERS_FOR_SIMILARITY = 4
 MINIMUM_LETTERS_FOR_SEARCH = 3
@@ -52,11 +52,15 @@ def closest_files(track: Track, files: Iterable["SharedFile"]) -> list["SharedFi
     """
     Pick, among the files broad searches returned, the ones that are likely to be a track, the likeliest first.
 
-    A file is only kept when its name holds the title, give or take a word and a letter, when its path names the
-    artist if the artist is sure, when its length is within :data:`LENGTH_TOLERANCE_SECONDS` of the length of
-    the track if both are known, and when it is the same kind of recording: a remix when a remix is wanted, and
-    never a remix, a live or an instrumental recording when none is. Files that are equally likely keep the order
-    they came in, which is the order of preference of sockseek.
+    A file is only kept when its name holds the title, give or take a word and a letter, when its name or one of
+    its folders names the artist if the artist is sure, when its length is within
+    :data:`LENGTH_TOLERANCE_SECONDS` of the length of the track if both are known, and when it is the same kind of
+    recording: a remix when a remix is wanted, and never a remix, a live or an instrumental recording when none
+    is. Files that are equally likely keep the order they came in, which is the order of preference of sockseek.
+
+    The artist is named when one part of the path, a folder or the name of the file, holds the words of the first
+    artist of the track, give or take a letter and a stray word in a long name. Words scattered over several
+    folders do not count, and neither does half a name: the song of another artist is never close enough.
 
     :param track: Track that no search naming it found
     :param files: Files returned by the searches of :func:`broad_searches`
@@ -174,6 +178,7 @@ class _WantedTrack:
     :param title_words: Words of the title, without what it holds in brackets and without version words
     :param detail_words: Other words of the title: who remixed it, which version, which label
     :param artist_words: Words of the main artist, empty when the track has none
+    :param first_artist_words: Words of the first name of that artist, which one part of a path has to hold
     :param artist_is_sure: Whether the path of a file has to name the artist
     :param recording_words: Words telling which kind of recording is wanted, such as ``remix`` or ``live``
     :param length_seconds: Length of the track, ``None`` when unknown
@@ -182,6 +187,7 @@ class _WantedTrack:
     title_words: tuple[str, ...]
     detail_words: tuple[str, ...]
     artist_words: tuple[str, ...]
+    first_artist_words: tuple[str, ...]
     artist_is_sure: bool
     recording_words: frozenset[str]
     length_seconds: int | None
@@ -203,6 +209,7 @@ class _WantedTrack:
             title_words=title_words or tuple(every_word),
             detail_words=tuple(word for word in every_word if word not in title_words) if title_words else (),
             artist_words=artist_words,
+            first_artist_words=tuple(_words(first_artist(track.primary_artist))),
             artist_is_sure=bool(artist_words) and not track.artist_is_uncertain,
             recording_words=_recording_words(title),
             length_seconds=track.duration_seconds,
@@ -216,10 +223,13 @@ class _WantedTrack:
         :returns: A score that is higher for a likelier file, ``None`` when the file cannot be the track
         """
         file_words = _words(file.stem)
-        path_words = _words(" ".join(PureWindowsPath(file.path).with_suffix("").parts))
+        path_parts = [_words(part) for part in PureWindowsPath(file.path).with_suffix("").parts]
+        path_words = [word for part_words in path_parts for word in part_words]
         title_coverage = _coverage(self.title_words, file_words)
         artist_coverage = _coverage(self.artist_words, path_words) if self.artist_words else 0.0
-        names_artist = artist_coverage >= MINIMUM_ARTIST_COVERAGE and bool(self.artist_words)
+        names_artist = bool(self.first_artist_words) and any(
+            _coverage(self.first_artist_words, part_words) >= MINIMUM_ARTIST_COVERAGE for part_words in path_parts
+        )
         length_difference, length_penalty = None, 0.0
         if self.length_seconds and file.length_seconds:
             length_difference = abs(self.length_seconds - file.length_seconds)

@@ -74,6 +74,47 @@ def test_the_artist_may_only_be_named_by_a_folder():
     ) == ["01 Engelsblut.mp3"]
 
 
+def test_the_song_of_another_artist_is_never_close_enough():
+    """
+    A file carrying the very title of the track is left out when no folder and no file name names its artist,
+    whatever else the path holds.
+    """
+    wise_man = Track(artists=("Tsunami",), title="Wise Man", duration_seconds=437)
+    assert (
+        names(
+            wise_man,
+            shared(r"Frank Zappa\The Man From Utopia\10 - Luigi & The Wise Guys.flac"),
+            shared(r"The Skatalites\Play Ska (2007)\The Skatalites - Play Ska - 01 - Wise Man.opus"),
+            shared(r"Reggae\Jnr Murvin - Wise Man.mp3", length_seconds=437),
+        )
+        == []
+    )
+    assert names(wise_man, shared(r"Techno\Tsunami - Wise Man.mp3")) == ["Tsunami - Wise Man.mp3"]
+
+
+def test_half_a_name_or_a_name_scattered_over_folders_does_not_name_the_artist():
+    """
+    Every word of a short artist name has to stand in the same folder name or in the name of the file.
+    """
+    bullet_proof = Track(artists=("Hd Substance",), title="Bullet Proof", duration_seconds=366)
+    assert (
+        names(
+            bullet_proof,
+            shared(r"FLAC HD\Goo Goo Dolls - 1998 - Dizzy Up the Girl\Goo Goo Dolls - 06 - Bullet Proof.flac"),
+            shared(r"HD\Substance Abuse\Bullet Proof.mp3"),
+            shared(r"Radiohead\The Bends\09 Bullet Proof...I Wish I Was.mp3"),
+        )
+        == []
+    )
+    assert names(
+        bullet_proof,
+        shared(r"Techno\HD Substance\Bullet Proof.mp3"),
+        shared(r"Techno\hd_substance-bullet_proof.mp3"),
+    ) == ["Bullet Proof.mp3", "hd_substance-bullet_proof.mp3"]
+    galvanize = Track(artists=("The Chemical Brothers",), title="Galvanize")
+    assert names(galvanize, shared(r"The Blues Brothers\Galvanize.mp3")) == []
+
+
 def test_a_remix_is_never_taken_for_the_original_nor_the_original_for_a_remix():
     """
     When a remix is wanted, only remixes are kept, the one naming the same remixer first. When the original is

@@ -184,7 +184,8 @@ alone, and Tandem DJ looks through everything that comes back for the file close
 taken when:
 
 - its name holds the title, give or take one word in four and one letter in a word;
-- its name or its folders name the artist (unless the artist is unsure, as with an uploader's name);
+- its name or one of its folders names the artist, whole: every word of a name of up to three words (unless the
+  artist is unsure, as with an uploader's name);
 - its length is within 15 seconds of the track, when both are known;
 - it is the same kind of recording: a remix when you asked for a remix, and never a remix, a live or an
   instrumental recording when you did not.
@@ -230,7 +231,7 @@ What the `Details` column says about a track marked `Failed`:
 | Details | Meaning |
 | --- | --- |
 | `not found: nobody on Soulseek shares a file matching this search` | The search returned nothing at all, even under the simpler spellings. |
-| `not found, and no file close enough came back from a broader search` | Searching the title alone and the artist alone returned nothing that looks like this track: it is probably not shared, or under a very different name. |
+| `not found, and no file close enough came back from a broader search` | Searching the title alone and the artist alone returned nothing that looks like this track: it is probably not shared, or under a very different name. Songs of the same title by other artists do not count. |
 | `not found: 42 files came up but none fits (wrong length or format...)` | Files were found, but none is an audio file within 3 seconds of the expected length, or their owners keep them private. Often another version of the track. |
 | `found, but none of the 3 sources tried sent the file (...)` | The track exists and was found. sockseek asked each person sharing it in turn (up to 10), and each one refused, went offline or stayed silent, so nothing was received. The names in brackets are the people it asked. Right-click the track and choose **Download again** later (they may simply be offline or busy) or **Download from another source**. |
 
