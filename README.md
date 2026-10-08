@@ -162,17 +162,21 @@ itself is usually shared as a folder of songs. So, once the search for a song ha
 
 A Soulseek search only returns files whose path holds every searched word, spelled the same way. A file named
 `arret_sur_image.mp3` is not found by searching `L'arrêt sur image`. So the tracks that were not found are searched
-again, in up to four rounds, each one looser than the last:
+again, in up to six rounds, each one looser than the last:
 
-| Round | What changes | `Sköne - L'arrêt sur image (Original Mix)` becomes |
+| Round | What changes | `Sköne - L'arrêt sur image (Original Mix) [LABEL01]` becomes |
 | --- | --- | --- |
-| 1 | Accents removed | `Skone - L'arret sur image (Original Mix)` |
-| 2 | Elided articles (`l'`, `d'`...) and punctuation removed | `Skone - arret sur image Original Mix` |
-| 3 | Decorations removed: `(Original Mix)`, `feat. X`, remaster notes | `Skone - arret sur image` |
-| 4 | Title alone, without the artist | `arret sur image` |
+| 1 | Accents removed | `Skone - L'arret sur image (Original Mix) [LABEL01]` |
+| 2 | Elided articles (`l'`, `d'`...) and punctuation removed, brackets, slashes and colons included | `Skone - arret sur image Original Mix LABEL01` |
+| 3 | Decorations removed: `(Original Mix)`, `feat. X`, remaster notes | `Skone - arret sur image LABEL01` |
+| 4 | Everything in parentheses or brackets removed | `Skone - arret sur image` |
+| 5 | Title alone, without the artist | `arret sur image LABEL01` |
+| 6 | Title alone, without what was in parentheses or brackets | `arret sur image` |
 
-Remix and edit names are never removed, since they name another recording. The title is only searched alone when
-the length of the track is known or the title has at least three words.
+A round that would repeat an earlier search is left out, so most tracks need two or three. What stands in
+parentheses or brackets is most often a label or a catalogue number, but it can be a remix name: it is kept as long
+as possible, and round 4 searches without it. The title is only searched alone when the length of the track is known
+or the title has at least three words.
 
 A looser search can return another recording than the one you wanted, so a track found this way is shown as
 **Downloaded - check** in amber, with the search that found it. When the length of the track is known (Spotify

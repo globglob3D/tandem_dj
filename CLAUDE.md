@@ -85,7 +85,7 @@ macOS. It holds `config.toml` (with the Soulseek password), `data/sockseek_index
    (columns `Artist,Title,Album[,Length]`), runs sockseek once on it with the folder of the batch as its output
    folder (see "Batch folders" below), then classifies each track from `data/sockseek_index.csv`.
    `keep_running=guard.is_connected` stops sockseek if the VPN drops.
-4. Still inside the VPN protection, `search_failed_tracks_again()` runs up to four more sockseek passes on the
+4. Still inside the VPN protection, `search_failed_tracks_again()` runs up to six more sockseek passes on the
    tracks in `report.failed`, each under its next `SearchVariant` (see "Relaxed search" below).
 5. Still inside the VPN protection, `download_albums()` searches as albums the tracks that are still in
    `report.failed` and look like one (see "Albums" below).
@@ -205,8 +205,15 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 
 - `relaxed_search_variants(track)` returns the spellings to try in order: accents folded, then elided articles and
   punctuation removed, then decorations removed (`strip_decorations()` keeps remix and edit names on purpose), then
-  the title alone. Round N of `search_failed_tracks_again()` searches every still-missing track under its Nth
-  variant; two tracks never share a spelling within a round.
+  everything in parentheses or brackets removed (`strip_bracketed_text()`), then the title alone, with and
+  without that bracketed text. Steps that change nothing are left out, so a track has at most six variants and
+  usually two or three. Round N of `search_failed_tracks_again()` searches every still-missing track under its
+  Nth variant; two tracks never share a spelling within a round.
+- **The order for brackets is the user's**: the title as written first, then without the brackets themselves
+  (`Kowloon City LFEK007`, which the punctuation step gives), then without what they hold (`Kowloon City`).
+  Slashes, colons, semicolons and other signs go in the punctuation step too. A remix name is therefore dropped
+  in the end as well; the `Length` column and the `Downloaded - check` flag are what guard against the original
+  being taken for the remix.
 - `SockseekDownloader.download_variants()` runs sockseek with **an index of its own** (deleted afterwards), then
   `record_downloads()` marks the found tracks as downloaded in the download history **under their real name**. The
   history therefore never holds a search spelling, and "already downloaded" keeps working for those tracks.

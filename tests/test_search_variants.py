@@ -10,6 +10,7 @@ from tandem_dj.search_variants import (
     fold_accents,
     relaxed_search_variants,
     simplify_punctuation,
+    strip_bracketed_text,
     strip_decorations,
 )
 
@@ -54,9 +55,55 @@ def test_decorations_are_dropped_but_named_versions_are_kept():
     track = Track(artists=("Bicep",), title="Glue (feat. Someone) [Original Mix]", duration_seconds=270)
     assert queries(track) == ["Bicep - Glue feat Someone Original Mix", "Bicep - Glue", "Glue"]
     remix = Track(artists=("Bicep",), title="Glue (Hammer Remix) - Remastered 2021")
+    assert queries(remix)[:2] == ["Bicep - Glue Hammer Remix Remastered 2021", "Bicep - Glue Hammer Remix"]
+
+
+def test_bracketed_text_is_kept_first_then_searched_bare_then_dropped():
+    """
+    A label in brackets is searched without the brackets, then left out; the title is then searched alone, with
+    the label and without it.
+    """
+    track = Track(artists=("Bauernfeind",), title="Kowloon City [LFEK007]", duration_seconds=312)
+    assert queries(track) == [
+        "Bauernfeind - Kowloon City LFEK007",
+        "Bauernfeind - Kowloon City",
+        "Kowloon City LFEK007",
+        "Kowloon City",
+    ]
+    assert [variant.description for variant in relaxed_search_variants(track)] == [
+        "without accents, articles and punctuation",
+        "also without what is written in parentheses or brackets",
+        "title alone, without the artist",
+        "title alone, without the artist and what is written in parentheses or brackets",
+    ]
+
+
+def test_a_remix_name_is_only_dropped_after_the_searches_that_keep_it():
+    """
+    The remix named in parentheses is searched first; the label next to it goes with it in the bare search.
+    """
+    track = Track(
+        artists=("Wolfram & Haddaway",),
+        title="My Love Is For Real (DJ Gigola & RIP Swirl HC Remix) [URAF01]",
+        duration_seconds=280,
+    )
+    assert queries(track) == [
+        "Wolfram Haddaway - My Love Is For Real DJ Gigola RIP Swirl HC Remix URAF01",
+        "Wolfram Haddaway - My Love Is For Real",
+        "My Love Is For Real DJ Gigola RIP Swirl HC Remix URAF01",
+        "My Love Is For Real",
+    ]
+
+
+def test_a_short_bare_title_is_not_searched_alone_without_a_length():
+    """
+    Without the length of the track, a title of one or two words is too common to be searched without its artist.
+    """
+    remix = Track(artists=("Bicep",), title="Glue (Hammer Remix) - Remastered 2021")
     assert queries(remix) == [
         "Bicep - Glue Hammer Remix Remastered 2021",
         "Bicep - Glue Hammer Remix",
+        "Bicep - Glue",
         "Glue Hammer Remix",
     ]
 
@@ -139,3 +186,22 @@ def test_strip_decorations(title, expected):
     Only what does not name another recording is removed, and a title is never emptied.
     """
     assert strip_decorations(title) == expected
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Kowloon City [LFEK007]", "Kowloon City"),
+        ("Glue (Hammer Remix)", "Glue"),
+        ("Glue (Hammer Remix) [Some Label] {2021}", "Glue"),
+        ("Glue (Hammer [Club] Remix)", "Glue"),
+        ("Glue (Part One) Reprise", "Glue Reprise"),
+        ("Glue", "Glue"),
+        ("[untitled]", "[untitled]"),
+    ],
+)
+def test_strip_bracketed_text(title, expected):
+    """
+    Parentheses, square brackets and braces go with what they hold, nested ones included; a title is never emptied.
+    """
+    assert strip_bracketed_text(title) == expected
