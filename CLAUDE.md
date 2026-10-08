@@ -86,7 +86,9 @@ macOS. It holds `config.toml` (with the Soulseek password), `data/sockseek_index
    table and the input file).
 3. Inside a `VpnGuard`, `SockseekDownloader.download()` removes duplicates, writes `data/inputs/<name>.csv`
    (columns `Artist,Title,Album[,Length]`), runs sockseek once on it with the folder of the batch as its output
-   folder (see "Batch folders" below), then classifies each track from `data/sockseek_index.csv`.
+   folder (see "Batch folders" below), then classifies each track from `data/sockseek_index.csv`. Tracks whose
+   artist is unsure get a second run, on `data/inputs/<name>_unsure_artists.csv` (see "Things that are not
+   obvious").
    `keep_running=guard.is_connected` stops sockseek if the VPN drops.
 4. Still inside the VPN protection, `search_failed_tracks_again()` runs up to six more sockseek passes on the
    tracks in `report.failed`, each under its next `SearchVariant` (see "Relaxed search" below).
@@ -241,7 +243,8 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 - `SockseekDownloader.download_variants()` runs sockseek with **an index of its own** (deleted afterwards), then
   `record_downloads()` marks the found tracks as downloaded in the download history **under their real name**. The
   history therefore never holds a search spelling, and "already downloaded" keeps working for those tracks.
-- Variants keep the `Length` column, so sockseek's 3 second tolerance still filters wrong recordings.
+- Variants keep the `Length` column, so sockseek's 3 second tolerance still filters wrong recordings among the
+  files that tell their length (see "Things that are not obvious").
 - Tracks found this way are in `report.relaxed_matches`; the window shows them as `Downloaded - check`
   (`theme.STATUS_FOUND_RELAXED`). Keep that flag visible: a looser search can return the wrong recording.
 - `ProgressTracker.follow_variants()` is called before each round (through `on_search_variants`), so that progress
@@ -434,6 +437,16 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
   waiting, which is what clears the progress of transfers cut by a restart.
 - **Only the first artist is written to the sockseek input**, because a Soulseek search needs every word to match a
   file path. `Track.artists` keeps them all.
+- **`--artist-maybe-wrong` applies to every track of a sockseek run**, not to the rows whose artist is unsure.
+  Measured in mock mode: with one unsure track in the input file, `Tsunami - Wise Man` took
+  `Frank Zappa - Wise Man.mp3`; alone, it failed. So `SockseekDownloader.download()` runs sockseek on the tracks
+  whose artist is known first, then a second time, with the option, on the ones whose artist is unsure
+  (`Track.artist_is_uncertain`: an uploader or channel name). A list holding both kinds costs one more login,
+  which `fulfil_request()` announces in the log. A list of one kind only still runs once, on `<name>.csv`.
+- **The 3 second length tolerance only filters files that tell their length.** Measured in mock mode: a 5 second
+  file is refused for a track of 437 seconds when sockseek reads its length, and accepted when it does not
+  (`--mock-files-no-read-tags`), `--strict-conditions` or not. On the real network many results carry no length,
+  so the `Length` column never made a search by title alone safe.
 - **sockseek exits with code 1 when some tracks fail**; that is a normal partial result, not a crash.
 - **Why a track failed** comes from the `failureReason` of its `track_state` event, turned into a sentence by
   `progress.describe_failure()`: `NoSearchResults` (nothing came back), `NoMatchingResults` (files came back, none

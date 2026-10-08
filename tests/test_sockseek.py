@@ -119,6 +119,20 @@ def test_build_command_passes_account_folders_and_preferences(tmp_path):
     assert command[-1] == "--fast-search"
 
 
+def test_build_command_only_searches_by_title_alone_when_every_artist_is_unsure(tmp_path):
+    """
+    One track whose artist is known is enough for sockseek not to be told that the artist may be wrong: the option
+    applies to every track of a run.
+    """
+    downloader = make_downloader(make_settings(tmp_path))
+    named_track = Track(artists=("Tsunami",), title="Wise Man")
+    unsure_track = Track(artists=("Some Uploader",), title="Some Song", artist_is_uncertain=True)
+    assert "--artist-maybe-wrong" in downloader.build_command(tmp_path / "input.csv", [unsure_track])
+    assert "--artist-maybe-wrong" not in downloader.build_command(tmp_path / "input.csv", [named_track, unsure_track])
+    assert "--artist-maybe-wrong" not in downloader.build_command(tmp_path / "input.csv", [named_track])
+    assert "--artist-maybe-wrong" not in downloader.build_command(tmp_path / "input.csv")
+
+
 def test_build_command_names_the_sources_to_prefer_and_to_avoid(tmp_path):
     """
     Sockseek is told which users to pick first and which to leave out, a skipped user being left out as well. A
@@ -445,6 +459,37 @@ def test_download_with_real_sockseek_against_local_files(tmp_path):
     assert third_report.downloaded == [found]
     assert third_report.already_downloaded == []
     assert saved_file.is_file()
+
+
+@pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file(), reason="sockseek is not installed in vendor/sockseek")
+def test_an_unsure_artist_in_the_list_does_not_loosen_the_search_of_the_other_tracks(tmp_path):
+    """
+    A track whose artist is known is not found in the song of another artist, even when the list also holds a
+    track whose artist is unsure. That one is searched in a run of its own, by title alone as well.
+    """
+    shared_files = tmp_path / "shared"
+    shared_files.mkdir()
+    (shared_files / "Frank Zappa - Wise Man.mp3").write_bytes(b"not really audio")
+    (shared_files / "Darude - Feel the Beat.mp3").write_bytes(b"not really audio")
+    settings = make_settings(
+        tmp_path, extra_arguments=("--mock-files-dir", str(shared_files), "--mock-files-no-read-tags", "--no-progress")
+    )
+    named = Track(artists=("Tsunami",), title="Wise Man")
+    unsure = Track(artists=("Some Uploader",), title="Feel the Beat", artist_is_uncertain=True)
+    downloader = make_downloader(settings)
+
+    report = downloader.download([unsure, named], "Mixed list")
+    assert report.failed == [named]
+    assert report.downloaded == [unsure]
+    assert [path.name for path in downloader.batch_directory.iterdir()] == ["Darude - Feel the Beat.mp3"]
+    assert sorted(path.name for path in settings.index_path.parent.joinpath("inputs").iterdir()) == [
+        "Mixed_list.csv",
+        "Mixed_list_unsure_artists.csv",
+    ]
+
+    other_downloader = make_downloader(make_settings(tmp_path / "other", extra_arguments=settings.extra_arguments))
+    assert other_downloader.download([unsure], "Unsure list").downloaded == [unsure]
+    assert [path.name for path in (tmp_path / "other" / "state" / "inputs").iterdir()] == ["Unsure_list.csv"]
 
 
 @pytest.mark.skipif(not SOCKSEEK_EXECUTABLE.is_file(), reason="sockseek is not installed in vendor/sockseek")

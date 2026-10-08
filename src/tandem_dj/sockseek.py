@@ -27,6 +27,7 @@ from tandem_dj.search_variants import SearchVariant
 from tandem_dj.text_cleaning import track_key
 
 INPUT_DIRECTORY_NAME = "inputs"
+UNSURE_ARTIST_INPUT_SUFFIX = "unsure_artists"
 RELAXED_INPUT_SUFFIX = "relaxed_search"
 RELAXED_INDEX_SUFFIX = ".index.csv"
 ALBUM_INPUT_SUFFIX = "album_search"
@@ -95,6 +96,10 @@ class SockseekDownloader:
         deleted, and so is that folder when nothing was saved in it. Sockseek is started again, on the tracks it
         has not downloaded yet, whenever :meth:`skip_source` is called meanwhile.
 
+        Tracks whose artist is unsure are downloaded by a sockseek run of their own, after the others: sockseek
+        searches every track of such a run by title alone as well, which a track whose artist is known must
+        never be.
+
         :param tracks: Tracks to download; duplicates are only requested once
         :param name: Name of the batch, used to name the generated sockseek input file
         :param keep_running: Condition checked every few seconds; sockseek is stopped as soon as it returns ``False``
@@ -106,14 +111,22 @@ class SockseekDownloader:
         requested_tracks = remove_duplicates(tracks)
         repair_index(self.settings.index_path)
         previously_downloaded = find_already_downloaded(requested_tracks, self.settings.index_path)
-        exit_code, stopped_early = self._run(
-            [input_row(track) for track in requested_tracks],
-            self.input_path_for(name),
-            self.settings.index_path,
-            keep_running,
-            on_output_line,
-            requested_tracks,
-        )
+        named_tracks = [track for track in requested_tracks if not track.artist_is_uncertain]
+        unsure_tracks = [track for track in requested_tracks if track.artist_is_uncertain]
+        unsure_input_name = f"{name} {UNSURE_ARTIST_INPUT_SUFFIX}" if named_tracks else name
+        exit_code, stopped_early = 0, False
+        for run_tracks, input_name in ((named_tracks, name), (unsure_tracks, unsure_input_name)):
+            if not run_tracks or stopped_early:
+                continue
+            run_exit_code, stopped_early = self._run(
+                [input_row(track) for track in run_tracks],
+                self.input_path_for(input_name),
+                self.settings.index_path,
+                keep_running,
+                on_output_line,
+                run_tracks,
+            )
+            exit_code = max(exit_code, run_exit_code)
         report = build_report(requested_tracks, self.settings.index_path, exit_code, previously_downloaded)
         report.stopped_early = stopped_early
         return report
@@ -367,7 +380,8 @@ class SockseekDownloader:
         Assemble the sockseek command line for one input file.
 
         :param input_path: File listing what to download: tracks as CSV rows, or links of chosen files
-        :param tracks: Tracks listed in the file; an unsure artist among them makes sockseek also search by title
+        :param tracks: Tracks listed in the file; when the artist of every one of them is unsure, sockseek also
+            searches them by title alone
         :param emit_progress_events: Whether sockseek prints its progress as JSON lines
         :param index_path: Index file sockseek reads and writes, the download history by default
         :param album: Whether the file lists albums: each one is saved in a folder of its own, under the file
@@ -405,7 +419,7 @@ class SockseekDownloader:
             command += ["--banned-users", SOURCE_SEPARATOR.join(avoided_sources)]
         if preferred_sources:
             command += ["--pref-allowed-users", SOURCE_SEPARATOR.join(preferred_sources)]
-        if any(track.artist_is_uncertain for track in tracks):
+        if tracks and all(track.artist_is_uncertain for track in tracks):
             command.append("--artist-maybe-wrong")
         if album:
             command += ["--min-album-track-count", str(MINIMUM_ALBUM_TRACKS)]
@@ -447,7 +461,8 @@ class SockseekDownloader:
         :param index_path: Index file sockseek reads and writes
         :param keep_running: Condition checked every few seconds; sockseek is stopped once it returns ``False``
         :param on_output_line: Receiver of every line sockseek prints
-        :param tracks: Tracks behind the rows; an unsure artist among them makes sockseek also search by title
+        :param tracks: Tracks behind the rows; when the artist of every one of them is unsure, sockseek also
+            searches them by title alone
         :param album: Whether the rows are albums
         :returns: ``(exit_code, stopped_early)`` of the last run; ``stopped_early`` only tells about ``keep_running``
         """

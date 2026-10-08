@@ -195,8 +195,8 @@ who shares it.
 
 A looser search can return another recording than the one you wanted, so a track found in any of these ways is
 shown as **Downloaded - check** in amber, with the search that found it. In the rounds, when the length of the track
-is known (Spotify gives it), the file must still be within 3 seconds of it. The download history records the track
-under its real name, so it is not downloaded again.
+is known (Spotify gives it), a file that tells its length must still be within 3 seconds of it. The download history
+records the track under its real name, so it is not downloaded again.
 
 Each round costs one search per missing track, and the broader search two. Switch all of it off with the "Search
 tracks that are not found again" setting.

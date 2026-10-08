@@ -174,6 +174,29 @@ def test_download_without_handled_vpn_asks_first_and_shows_the_visible_address(t
     )
 
 
+def test_a_list_mixing_known_and_unsure_artists_says_that_sockseek_runs_twice(tmp_path, recording_downloader):
+    """
+    The log says that the tracks whose artist is unsure get a run of their own, and only when a list holds both
+    kinds of tracks.
+    """
+    unsure = Track(artists=("Some Uploader",), title="Some Song", artist_is_uncertain=True)
+    settings = make_settings(tmp_path, VPN_MODE_NONE)
+    notifications: list[str] = []
+    for tracks in ([TRACK, unsure, OTHER_TRACK], [TRACK, OTHER_TRACK], [unsure]):
+        run_download(
+            settings,
+            tracks,
+            "list",
+            batch_directory(tmp_path),
+            lambda message, level: notifications.append(message),
+            lambda question: True,
+        )
+    announcements = [message for message in notifications if "sockseek runs a second time" in message]
+    assert len(announcements) == 1
+    assert announcements[0].startswith("The artist of 1 tracks is unsure")
+    assert recording_downloader.runs == [[TRACK, unsure, OTHER_TRACK], [TRACK, OTHER_TRACK], [unsure]]
+
+
 def test_download_without_handled_vpn_still_asks_when_the_address_is_unknown(
     tmp_path, recording_downloader, monkeypatch
 ):

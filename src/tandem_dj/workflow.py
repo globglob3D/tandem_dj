@@ -301,6 +301,13 @@ def fulfil_request(
             report = DownloadReport(failed=list(request.tracks))
             album_candidates = list(request.tracks)
         else:
+            unsure_count = sum(track.artist_is_uncertain for track in request.tracks)
+            if 0 < unsure_count < len(request.tracks):
+                notify(
+                    f"The artist of {unsure_count} tracks is unsure: sockseek runs a second time for them, searching "
+                    "them by title alone as well. The other tracks are only searched with their artist.",
+                    LEVEL_INFORMATION,
+                )
             report = downloader.download(request.tracks, name, keep_running, on_output_line)
             if settings.relaxed_search:
                 search_failed_tracks_again(
