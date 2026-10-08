@@ -67,7 +67,7 @@ installer/
   tandem_dj.iss      Inno Setup script of the Windows setup program
   THIRD_PARTY_NOTICES.txt  licences of what is shipped inside the application
 tests/               pytest; no network access (address lookups are replaced); conftest.py points the user data
-                     folder at a temporary folder
+                     folder at a temporary folder and, on GitHub Actions, prints each failure as an annotation
 vendor/sockseek/     the sockseek program (untracked, >100 MB), its licence, and restore instructions
 ```
 
@@ -329,6 +329,10 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
   project has a Mac at hand. It runs the test suite (with the real macOS sockseek in mock mode), the build and the
   smoke test on each system, and uploads the setup program and disk images as artifacts. Mac problems reported by
   friends should be reproduced there, by adding to the tests or to the smoke test.
+- **Reading why a test failed on a Mac**: the log of a run needs a GitHub login, its annotations do not.
+  `tests/conftest.py` prints the end of each failure as an `::error` annotation when `GITHUB_ACTIONS` is set;
+  read them from `https://api.github.com/repos/<owner>/<repository>/check-runs/<job id>/annotations`, the job id
+  coming from `.../actions/runs/<run id>/jobs`. GitHub keeps at most ten error annotations per step.
 - Nothing is code signed. Windows shows "Windows protected your PC" and macOS refuses the first launch until the
   user allows it; `README.md` tells users what to click.
 - `scripts/smoke_test.py` is the check that a build works: it starts the program with `TANDEM_DJ_HOME` pointing at
