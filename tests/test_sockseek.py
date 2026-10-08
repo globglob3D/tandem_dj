@@ -662,7 +662,7 @@ def test_track_found_under_another_spelling_is_remembered_under_its_real_name(tm
 
     variants = {
         track: SearchVariant("Skone", "arret sur image", "without accents, articles and punctuation"),
-        hopeless: SearchVariant("", "Missing Song", "title alone, without the artist"),
+        hopeless: SearchVariant("Nobody Real", "Missing Song Extended", "without accents"),
     }
     saved_files, stopped_early = downloader.download_variants(variants, "French list")
     assert not stopped_early

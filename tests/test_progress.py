@@ -447,10 +447,11 @@ def test_events_of_a_simpler_spelling_reach_the_track_it_stands_for():
     )
     assert tracker.snapshot()[0].status == STATUS_FAILED
 
-    tracker.follow_variants({accented: SearchVariant("", "arret sur image", "title alone, without the artist")})
+    variant = SearchVariant("Skone", "arret sur image", "without accents, articles and punctuation")
+    tracker.follow_variants({accented: variant})
     waiting = tracker.snapshot()[0]
-    assert (waiting.status, waiting.relaxed_query) == (STATUS_WAITING, "arret sur image")
-    assert waiting.detail == 'searching again as "arret sur image"'
+    assert (waiting.status, waiting.relaxed_query) == (STATUS_WAITING, "Skone - arret sur image")
+    assert waiting.detail == 'searching again as "Skone - arret sur image"'
 
     tracker.handle_line(
         json.dumps(
@@ -458,7 +459,7 @@ def test_events_of_a_simpler_spelling_reach_the_track_it_stands_for():
                 "type": "track_state",
                 "timestamp": "2026-10-07T15:38:01Z",
                 "data": {
-                    "artist": "",
+                    "artist": "Skone",
                     "title": "arret sur image",
                     "lifecycleState": "Terminal",
                     "terminalOutcome": "Succeeded",
@@ -470,7 +471,7 @@ def test_events_of_a_simpler_spelling_reach_the_track_it_stands_for():
     )
     found, untouched = tracker.snapshot()
     assert (found.status, found.saved_path) == (STATUS_DOWNLOADED, "D:/music/arret_sur_image.mp3")
-    assert found.relaxed_query == "arret sur image"
+    assert found.relaxed_query == "Skone - arret sur image"
     assert (untouched.status, untouched.relaxed_query) == (STATUS_WAITING, "")
 
 

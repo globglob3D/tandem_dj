@@ -222,10 +222,15 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
 
 - `relaxed_search_variants(track)` returns the spellings to try in order: accents folded, then elided articles and
   punctuation removed, then decorations removed (`strip_decorations()` keeps remix and edit names on purpose), then
-  what is in parentheses or brackets removed except version words (`strip_bracketed_text()`), then the title
-  alone, with and without that bracketed text. Steps that change nothing are left out, so a track has at most six variants and
-  usually two or three. Round N of `search_failed_tracks_again()` searches every still-missing track under its
-  Nth variant; two tracks never share a spelling within a round.
+  what is in parentheses or brackets removed except version words (`strip_bracketed_text()`). Steps that change
+  nothing are left out, so a track has at most four variants and usually one or two. Round N of
+  `search_failed_tracks_again()` searches every still-missing track under its Nth variant; two tracks never share
+  a spelling within a round.
+- **No search drops the artist**, the user's decision: a title searched alone brings the songs other artists gave
+  the same name. Seen on the real network, with the length of the track in the `Length` column: `Tsunami - Wise
+  Man` searched as `Wise Man` saved `Frank Zappa - Luigi & The Wise Guys.flac` (the album folder is `The Man From
+  Utopia`, and a search matches words anywhere in the path), and `Hd Substance - Bullet Proof` searched as
+  `Bullet Proof` saved a Goo Goo Dolls song. A wrong file flagged `Downloaded - check` is worse than `Failed`.
 - **The order for brackets is the user's**: the title as written first, then without the brackets themselves
   (`Kowloon City LFEK007`, which the punctuation step gives), then without what they hold (`Kowloon City`).
   Slashes, colons, semicolons and other signs go in the punctuation step too.
@@ -485,9 +490,9 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
   bracketed text at reading time because it looks useless.
 - **`Artist : Title` and `Artist / Title` split a title that holds no dash and no `|`**, only with a space on
   both sides (`AC/DC`, `24/7` and `Mission: Impossible` stay whole). Without the split the uploader is taken as
-  an unsure artist and the whole text as the title, which never gets the search by title alone; with it,
-  `Cherry Moon trax 1 : The house of house` ends up searched as `The house of house`. A wrong split still searches
-  every word of the title, only without the name of the uploader. Not measured against sockseek.
+  an unsure artist and the whole text as the title; with it, `Cherry Moon trax 1 : The house of house` gets the
+  broad search of its title, among whose results a file naming `Cherry Moon Trax` is close enough. Not measured
+  against sockseek.
 - **A YouTube video link that names a playlist** (`watch?v=<video>&list=<playlist>`) is read through the page of
   the playlist (`playlist_link()` builds `playlist?list=<playlist>`). Asked for the video link, yt-dlp reads the
   page of the video and takes the playlist from its side panel; when YouTube serves that page without the panel,

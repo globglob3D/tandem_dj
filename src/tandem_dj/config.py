@@ -251,8 +251,9 @@ preferred_formats = {preferred_formats}
 preferred_minimum_bitrate = {preferred_minimum_bitrate}
 
 # When true, tracks that are not found are searched again under simpler spellings: without accents, without
-# articles and punctuation, without decorations such as (Original Mix), without what is in brackets, and by title
-# alone. The ones still missing are then searched more broadly, and the closest file of what comes back is taken.
+# articles and punctuation, without decorations such as (Original Mix) and without what is in brackets, always
+# with their artist. The ones still missing are then searched more broadly, and the closest file of what comes
+# back is taken.
 relaxed_search = {relaxed_search}
 
 # When true, an entry that is not found as a song and looks like a whole album (announced as "full album", or 15

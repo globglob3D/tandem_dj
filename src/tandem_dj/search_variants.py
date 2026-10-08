@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from tandem_dj.models import Track
 from tandem_dj.text_cleaning import normalize_text
 
-MINIMUM_WORDS_FOR_TITLE_ONLY = 3
 _UNDECOMPOSABLE_LETTERS = str.maketrans(
     {
         "ø": "o",
@@ -59,10 +58,9 @@ def relaxed_search_variants(track: Track) -> list["SearchVariant"]:
 
     Each step builds on the previous one: accents are removed, then elided articles and punctuation (the brackets
     themselves included, not what they hold), then decorations such as ``(Original Mix)`` and featured artists,
-    then what is written in parentheses or brackets, except the words that name a version such as ``Remix``, and
-    finally the artist itself, with and without the bracketed text. Steps that change nothing are left out. A
-    search by title alone is only offered when the length of the track is known or the title searched is long
-    enough to be distinctive, and never for a track whose artist is unsure, which is already searched that way.
+    then what is written in parentheses or brackets, except the words that name a version such as ``Remix``.
+    Steps that change nothing are left out. Every variant names the artist of the track: a title searched alone
+    returns the songs other artists gave the same name.
 
     :param track: Track that was not found under its exact name
     :returns: The variants to try in order, possibly none
@@ -77,14 +75,6 @@ def relaxed_search_variants(track: Track) -> list["SearchVariant"]:
         SearchVariant(simple_artist, simple_title, "also without decorations such as (Original Mix) or feat."),
         SearchVariant(simple_artist, bare_title, f"also without {_BRACKETED_TEXT_DESCRIPTION}"),
     ]
-    if simple_artist and not track.artist_is_uncertain:
-        titles_alone = (
-            (simple_title, "title alone, without the artist"),
-            (bare_title, f"title alone, without the artist and {_BRACKETED_TEXT_DESCRIPTION}"),
-        )
-        for title_alone, description in titles_alone:
-            if track.duration_seconds or len(title_alone.split()) >= MINIMUM_WORDS_FOR_TITLE_ONLY:
-                candidates.append(SearchVariant("", title_alone, description))
     variants: list[SearchVariant] = []
     seen = {_identity(track.primary_artist, track.title)}
     for candidate in candidates:
@@ -100,7 +90,7 @@ class SearchVariant:
     """
     Another spelling of a track to search for.
 
-    :param artist: Artist to search for, empty when searching by title alone
+    :param artist: Artist to search for, empty when the track has none
     :param title: Title to search for
     :param description: What was changed, in a few words meant for the user
     """

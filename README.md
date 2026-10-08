@@ -162,7 +162,7 @@ itself is usually shared as a folder of songs. So, once the search for a song ha
 
 A Soulseek search only returns files whose path holds every searched word, spelled the same way. A file named
 `arret_sur_image.mp3` is not found by searching `L'arrêt sur image`. So the tracks that were not found are searched
-again, in up to six rounds, each one looser than the last:
+again, in up to four rounds, each one looser than the last:
 
 | Round | What changes | `Sköne - L'arrêt sur image (Original Mix) [LABEL01]` becomes |
 | --- | --- | --- |
@@ -170,14 +170,12 @@ again, in up to six rounds, each one looser than the last:
 | 2 | Elided articles (`l'`, `d'`...) and punctuation removed, brackets, slashes and colons included | `Skone - arret sur image Original Mix LABEL01` |
 | 3 | Decorations removed: `(Original Mix)`, `feat. X`, remaster notes | `Skone - arret sur image LABEL01` |
 | 4 | What is in parentheses or brackets removed, except words such as `Remix` | `Skone - arret sur image` |
-| 5 | Title alone, without the artist | `arret sur image LABEL01` |
-| 6 | Title alone, without what was in parentheses or brackets | `arret sur image` |
 
-A round that would repeat an earlier search is left out, so most tracks need two or three. What stands in
+A round that would repeat an earlier search is left out, so most tracks need one or two. What stands in
 parentheses or brackets is most often a label or a catalogue number, but it can be a remix name: it is kept as long
-as possible, and from round 4 only the word naming the version stays. `Glue (Hammer Remix) [Some Label]` is then
-searched as `Glue Remix`: the remixer is no longer named, but a remix is still what is asked for. The title is only
-searched alone when the length of the track is known or the title has at least three words.
+as possible, and in round 4 only the word naming the version stays. `Glue (Hammer Remix) [Some Label]` is then
+searched as `Glue Remix`: the remixer is no longer named, but a remix is still what is asked for. Every round keeps
+the artist: many songs share a title, and a title searched alone would bring the song of somebody else.
 
 **Then the closest file of a broader search.** Every round above still needs each searched word in the name of the
 file, so one word written differently (`Lovin'` for `Loving`, a stray number, `ue` for `ü`) hides the track from

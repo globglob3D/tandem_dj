@@ -27,25 +27,26 @@ def queries(track: Track) -> list[str]:
 
 def test_accents_articles_and_punctuation_are_removed_step_by_step():
     """
-    A French title is searched without accents, then without its elided article, then by title alone when its
-    length is known.
+    A French title is searched without accents, then without its elided article.
     """
     track = Track(artists=("Sköne",), title="L'arrêt sur image", duration_seconds=240)
-    assert queries(track) == ["Skone - L'arret sur image", "Skone - arret sur image", "arret sur image"]
+    assert queries(track) == ["Skone - L'arret sur image", "Skone - arret sur image"]
     assert [variant.description for variant in relaxed_search_variants(track)] == [
         "without accents",
         "without accents, articles and punctuation",
-        "title alone, without the artist",
     ]
 
 
-def test_a_plain_track_only_gets_the_title_alone():
+def test_a_title_is_never_searched_without_its_artist():
     """
-    Nothing is offered that would repeat the exact search; a distinctive title is still tried without its artist.
+    Nothing is offered that would repeat the exact search, and no search drops the artist: the title alone would
+    return the songs other artists gave the same name, whether the title is long or the length is known.
     """
-    assert queries(Track(artists=("Darude",), title="Feel the Beat")) == ["Feel the Beat"]
-    assert queries(Track(artists=("Darude",), title="Sandstorm")) == []
-    assert queries(Track(artists=("Darude",), title="Sandstorm", duration_seconds=225)) == ["Sandstorm"]
+    assert queries(Track(artists=("Darude",), title="Feel the Beat")) == []
+    assert queries(Track(artists=("Tsunami",), title="Wise Man", duration_seconds=437)) == []
+    assert queries(Track(artists=("Hd Substance",), title="Bullet Proof", duration_seconds=366)) == []
+    labelled = Track(artists=("Sköne",), title="L'arrêt sur image (Original Mix) [LABEL01]", duration_seconds=240)
+    assert all(variant.artist == "Skone" for variant in relaxed_search_variants(labelled))
 
 
 def test_decorations_are_dropped_but_named_versions_are_kept():
@@ -53,28 +54,20 @@ def test_decorations_are_dropped_but_named_versions_are_kept():
     Featured artists and notes such as (Original Mix) go; a remix name stays, since it names another recording.
     """
     track = Track(artists=("Bicep",), title="Glue (feat. Someone) [Original Mix]", duration_seconds=270)
-    assert queries(track) == ["Bicep - Glue feat Someone Original Mix", "Bicep - Glue", "Glue"]
+    assert queries(track) == ["Bicep - Glue feat Someone Original Mix", "Bicep - Glue"]
     remix = Track(artists=("Bicep",), title="Glue (Hammer Remix) - Remastered 2021")
     assert queries(remix)[:2] == ["Bicep - Glue Hammer Remix Remastered 2021", "Bicep - Glue Hammer Remix"]
 
 
 def test_bracketed_text_is_kept_first_then_searched_bare_then_dropped():
     """
-    A label in brackets is searched without the brackets, then left out; the title is then searched alone, with
-    the label and without it.
+    A label in brackets is searched without the brackets, then left out.
     """
     track = Track(artists=("Bauernfeind",), title="Kowloon City [LFEK007]", duration_seconds=312)
-    assert queries(track) == [
-        "Bauernfeind - Kowloon City LFEK007",
-        "Bauernfeind - Kowloon City",
-        "Kowloon City LFEK007",
-        "Kowloon City",
-    ]
+    assert queries(track) == ["Bauernfeind - Kowloon City LFEK007", "Bauernfeind - Kowloon City"]
     assert [variant.description for variant in relaxed_search_variants(track)] == [
         "without accents, articles and punctuation",
         "also without what is in parentheses or brackets, except words such as Remix",
-        "title alone, without the artist",
-        "title alone, without the artist and what is in parentheses or brackets, except words such as Remix",
     ]
 
 
@@ -90,27 +83,12 @@ def test_the_word_remix_stays_when_the_name_of_the_remixer_is_dropped():
     assert queries(track) == [
         "Wolfram Haddaway - My Love Is For Real DJ Gigola RIP Swirl HC Remix URAF01",
         "Wolfram Haddaway - My Love Is For Real Remix",
-        "My Love Is For Real DJ Gigola RIP Swirl HC Remix URAF01",
-        "My Love Is For Real Remix",
     ]
 
 
-def test_a_short_bare_title_is_not_searched_alone_without_a_length():
+def test_an_unsure_artist_stays_in_the_variants():
     """
-    Without the length of the track, a title of one or two words is too common to be searched without its artist.
-    """
-    remix = Track(artists=("Bicep",), title="Glue (Hammer Remix) - Remastered 2021")
-    assert queries(remix) == [
-        "Bicep - Glue Hammer Remix Remastered 2021",
-        "Bicep - Glue Hammer Remix",
-        "Bicep - Glue Remix",
-        "Glue Hammer Remix",
-    ]
-
-
-def test_title_alone_is_not_offered_when_the_artist_is_already_unsure():
-    """
-    A track whose artist is unsure is searched by title alone from the start, so that variant is left out.
+    A track whose artist may be an uploader keeps that name in every variant.
     """
     track = Track(artists=("Some Uploader",), title="Très long titre accentué", artist_is_uncertain=True)
     assert queries(track) == ["Some Uploader - Tres long titre accentue"]

@@ -16,7 +16,6 @@ from pathlib import PureWindowsPath
 
 from tandem_dj.models import Track
 from tandem_dj.search_variants import (
-    MINIMUM_WORDS_FOR_TITLE_ONLY,
     fold_accents,
     simplify_punctuation,
     strip_bracketed_text,
@@ -32,6 +31,7 @@ MINIMUM_ARTIST_COVERAGE = 0.5
 MINIMUM_WORD_SIMILARITY = 0.85
 MINIMUM_LETTERS_FOR_SIMILARITY = 4
 MINIMUM_LETTERS_FOR_SEARCH = 3
+MINIMUM_WORDS_FOR_TITLE_ONLY = 3
 TITLE_WEIGHT = 0.45
 ARTIST_WEIGHT = 0.2
 DETAIL_WEIGHT = 0.15
