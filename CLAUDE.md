@@ -492,14 +492,14 @@ First released as 0.2.0; 0.3.0 added one folder per download, 0.4.0 reduced the 
 the settings, 0.5.0 made "already downloaded" depend on the file still being there. 0.6.0 added the right-click
 menu on tracks (download one again, from the same or another source, as an album; leave a silent source), sortable
 columns, whole albums, failures explained in plain words, the setting for silent sources, and the reading of the
-whole playlist behind a YouTube video link. Since 0.6.0, not released yet: the relaxed search drops what titles
-hold in brackets step by step, and the closest file of a broader search is taken for tracks no spelling finds.
-What is known to work and what is not:
+whole playlist behind a YouTube video link. 0.7.0, released on 2026-10-08, made tracks from YouTube easier to
+find: titles written `Artist : Title` or `Artist / Title` are split, the relaxed search drops what titles hold in
+brackets step by step while keeping the word naming a version, and the closest file of a broader search is taken
+for tracks no spelling finds. What is known to work and what is not:
 
-- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**, as of 0.6.0: the whole test
-  suite (252 tests then, none skipped, including the offline runs of the real sockseek and the hidden-window
-  tests), the build, and the smoke test showing that the packaged application starts and that the sockseek and
-  ffmpeg packed inside answer. The work done since has only run on Windows (315 tests).
+- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (315
+  tests, none skipped, including the offline runs of the real sockseek and the hidden-window tests), the build, and
+  the smoke test showing that the packaged application starts and that the sockseek and ffmpeg packed inside answer.
 - **Checked by hand on Windows**: the setup program installs, starts and uninstalls; a whole download driven through
   the real window against sockseek's mock mode (exact search, relaxed search, M4A conversion, password masked in
   the log), and three downloads in a row landing in their own folders (a text file, typed tracks, and one with
