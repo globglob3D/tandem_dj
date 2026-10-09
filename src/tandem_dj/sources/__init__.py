@@ -1,5 +1,5 @@
 """
-Everything tracks can be read from: Spotify, YouTube, SoundCloud and hand-written text.
+Everything tracks can be read from: Spotify, YouTube, SoundCloud, NTS Radio and hand-written text.
 
 :func:`read_tracks` is the single entry point. Supporting a new website means writing a
 :class:`~tandem_dj.sources.base.TrackSource` and adding it to :data:`WEBSITE_SOURCES`.
@@ -10,6 +10,7 @@ from pathlib import Path
 
 from tandem_dj.models import TEXT_ORIGIN, TrackCollection
 from tandem_dj.sources.base import SourceError, TrackSource
+from tandem_dj.sources.nts import NtsSource
 from tandem_dj.sources.soundcloud import SoundCloudSource
 from tandem_dj.sources.spotify import SpotifySource
 from tandem_dj.sources.text import parse_track_line
@@ -17,7 +18,7 @@ from tandem_dj.sources.youtube import YouTubeSource
 
 __all__ = ["WEBSITE_SOURCES", "SourceError", "read_track_lines", "read_tracks"]
 
-WEBSITE_SOURCES: tuple[TrackSource, ...] = (SpotifySource(), YouTubeSource(), SoundCloudSource())
+WEBSITE_SOURCES: tuple[TrackSource, ...] = (SpotifySource(), YouTubeSource(), SoundCloudSource(), NtsSource())
 
 
 def read_tracks(reference: str) -> TrackCollection:

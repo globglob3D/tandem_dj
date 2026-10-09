@@ -163,7 +163,7 @@ class MainWindow(tkinter.Tk):
         frame.pack(fill="x")
         ttk.Label(
             frame,
-            text='Spotify, YouTube or SoundCloud links, or tracks written as "Artist - Title". One per line.',
+            text='Spotify, YouTube, SoundCloud or NTS links, or tracks written as "Artist - Title". One per line.',
         ).grid(row=0, column=0, sticky="w")
         self.input_box = tkinter.Text(frame, height=4, wrap="none", undo=True, font=theme.FONT)
         theme.style_text_box(self.input_box)

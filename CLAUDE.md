@@ -1,9 +1,9 @@
 # tandem_dj
 
 Tandem DJ: a window for managing DJ music, meant to be shared with friends who are not computer savvy. It reads
-track lists from Spotify, YouTube, SoundCloud or plain text and downloads the tracks from Soulseek by driving the
-`sockseek` program. More features (such as preparing files for rekordbox) are expected; keep the structure easy to
-extend. It runs on Windows and macOS.
+track lists from Spotify, YouTube, SoundCloud, NTS Radio or plain text and downloads the tracks from Soulseek by
+driving the `sockseek` program. More features (such as preparing files for rekordbox) are expected; keep the
+structure easy to extend. It runs on Windows and macOS.
 
 ## Commands
 
@@ -59,6 +59,7 @@ src/tandem_dj/
     spotify.py       embed page + web player query API, no account
     youtube.py       yt-dlp flat playlist listing
     soundcloud.py    api-v2.soundcloud.com with the website's public client_id
+    nts.py           www.nts.live/api/v2: the tracklist of one episode of an NTS Radio show
     text.py          parse_track_line() for hand-written lines
 scripts/
   make_icon.py       draws the icon (two birds in pixel art) with the standard library only
@@ -515,6 +516,21 @@ meant for the user are dedicated exceptions (`SourceError`, `DownloadError`, `Co
   to anonymous tokens. The playlist response also carries BPM and Camelot key per track
   (`playlistAudioAttributes`), unused so far.
 - **SoundCloud** describes only the first few tracks of a set in full; the others are fetched by id in batches of 50.
+- **NTS** (`sources/nts.py`): `www.nts.live/api/v2/shows/<show>/episodes/<episode>` answers without account
+  or key, and holds the whole tracklist in `embeds.tracklist.results` (measured up to 35 entries: `limit`
+  equals `count`). An episode without tracklist has an empty `results`, or an empty list in place of the whole
+  `tracklist`. The names in the address are in lower case; any other case answers 404. Each entry has `artist`
+  and `title` apart, so nothing is parsed from free text and no artist is unsure. `artist` is one text joining
+  the main artists, the featured ones and the remixers with commas, and some hosts write `A Ft. B` in it: the
+  reader splits at commas and at `feat.`, so the first name is the main artist (a name that holds a comma is
+  cut there). **The `duration` of an entry is not the length of the track**: it is how long it was heard in
+  the show (`offset` plus `duration` is about the `offset` of the next entry), so it is never put in the `Length`
+  column, where sockseek's 3 second tolerance would refuse the right file. Older episodes have neither. The
+  episode page embeds the same tracklist with the artists by role (`window._REACT_STATE_`, `mainArtists`,
+  `featuringArtists`, `remixArtists`), unused: the API is the simpler thing to depend on. The collection is
+  named `<episode name> (<day of broadcast>)`, because many episodes are named after their show alone.
+  `accepts()` takes every `nts.live` link so that a show or mixtape link gets `NOT_AN_EPISODE_MESSAGE`
+  instead of "Unsupported link".
 - **YouTube** flat listings carry only title, channel and duration, so artists are parsed from titles. Channels
   ending in ` - Topic` are auto-generated and name the artist reliably.
 - **`strip_noise()` only drops known decorations from an upload title** (`(Official Video)`, `[FREE DL]`, a bare
@@ -552,9 +568,10 @@ left out of the matching any more, after two songs of other artists were saved f
 relaxed search has no round without the artist, tracks whose artist is unsure go to sockseek in a run of their
 own, and the closest file must name the whole artist in one part of its path. 0.9.0, released on
 2026-10-08 too, added the `Name on Soulseek` column, which shows what each downloaded file was named where it
-was shared. What is known to work and what is not:
+was shared. 0.10.0, released on 2026-10-09, reads the tracklist of an episode of an NTS Radio show from its link.
+What is known to work and what is not:
 
-- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (340
+- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (354
   tests, including the offline runs of the real sockseek and the hidden-window tests; the one reading the Windows
   registry is skipped on macOS), the build, and the smoke test showing that the packaged application starts and
   that the sockseek and ffmpeg packed inside answer.

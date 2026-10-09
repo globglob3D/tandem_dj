@@ -1,8 +1,8 @@
 # Tandem DJ
 
-A window for managing DJ music. It reads track lists from Spotify, YouTube and SoundCloud (or from what you type)
-and batch-downloads the tracks from Soulseek as MP3 files, straight onto the USB key, each download in a folder
-named after its playlist.
+A window for managing DJ music. It reads track lists from Spotify, YouTube, SoundCloud and NTS Radio (or from what
+you type) and batch-downloads the tracks from Soulseek as MP3 files, straight onto the USB key, each download in a
+folder named after its playlist.
 
 - For everyone: [Installing](#installing), [Using it](#using-it),
   [Acting on single tracks](#acting-on-single-tracks), [Whole albums](#whole-albums),
@@ -43,8 +43,9 @@ To update, install the new version over the old one. Settings and download histo
 
 ## Using it
 
-1. **Paste** one or more Spotify, YouTube or SoundCloud links, or tracks written as `Artist - Title`, one per line.
-   The path of a text file holding such lines works too.
+1. **Paste** one or more Spotify, YouTube, SoundCloud or NTS links, or tracks written as `Artist - Title`, one per
+   line. The path of a text file holding such lines works too. For NTS Radio, paste the link of one episode of a
+   show: its tracklist is read.
 2. **Read tracks** fills the table. The `Artist (sent)` and `Title (sent)` columns are exactly what sockseek will
    receive, so parsing mistakes are visible before anything is downloaded. Notes show further credited artists and
    tracks whose artist is unsure; tracks whose file from an earlier download is still there are marked
@@ -87,6 +88,7 @@ Every download gets a new folder inside the download folder chosen in the settin
 | What was pasted | Folder of the download |
 | --- | --- |
 | A Spotify, YouTube or SoundCloud link | `Son 2 Teuf - spotify - 2026-10-07 21-45-03`: the name of the playlist, album or track, the website, the date and time |
+| The link of an NTS episode | `Some Show w A Guest (2026-01-31) - nts - 2026-10-07 21-45-03`: the name of the episode, the day it was broadcast, the website, the date and time |
 | A link whose name could not be read | `spotify - 2026-10-07 21-45-03` |
 | The path of a text file, such as `my set.txt` | `my set - 2026-10-07 21-45-03` |
 | Tracks typed by hand, or several links at once | `2026-10-07 21-45-03` |
@@ -288,6 +290,7 @@ Soulseek is a peer-to-peer network: the people you download from see the IP addr
 | Spotify | Public embed page, then the web player's own API with the anonymous token it provides. No account, no API key. | Public playlists only. If the web player API changes, the reader falls back to the embed page, which stops at 100 tracks, and says so. |
 | YouTube | [yt-dlp](https://github.com/yt-dlp/yt-dlp) playlist listing. Video titles are cleaned (`(Official Video)` and the like) and split into artist and title. Other text in parentheses or brackets, such as a remix or a label name, is kept for the first search and only left out when the track is not found (see "When a track is not found"). Without a dash, `Artist | Title`, `Artist : Title` and `Artist / Title` are split too. The link of a video opened from a playlist (`watch?v=...&list=...`) reads the whole playlist, like the link of the playlist itself. | Titles are free text, so check the result with **Read tracks** before downloading. Private playlists, and the mixes YouTube builds for one listener, give only the video of the link; a warning says so. |
 | SoundCloud | The website's public API. Artists come from the publisher metadata when present, otherwise from the title. | Same caveat as YouTube. Private sets are not readable. |
+| NTS Radio | The website's public API, which gives the tracklist of an episode (`nts.live/shows/<show>/episodes/<episode>`) with artist and title apart. Of several artists, the first is the one searched. | Only episodes have a tracklist, and not all of them: a link to a show, a mixtape or an episode without tracklist is refused with an explanation. NTS gives no track lengths. |
 
 If a website stops working, upgrade the readers first (`uv lock --upgrade-package yt-dlp; uv sync`), then build and
 share a new version: an installed application keeps the readers it was built with. As a last resort any list can be

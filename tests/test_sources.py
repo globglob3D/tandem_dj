@@ -8,7 +8,8 @@ import pytest
 import yt_dlp
 
 from tandem_dj.models import Track, TrackCollection
-from tandem_dj.sources import SourceError, read_track_lines, read_tracks, youtube
+from tandem_dj.sources import WEBSITE_SOURCES, SourceError, nts, read_track_lines, read_tracks, youtube
+from tandem_dj.sources.nts import NOT_AN_EPISODE_MESSAGE, NtsSource
 from tandem_dj.sources.soundcloud import SoundCloudSource, _track_from_description
 from tandem_dj.sources.spotify import SpotifySource, _track_from_playlist_item, _tracks_from_embed_list
 from tandem_dj.sources.text import parse_track_line
@@ -26,15 +27,15 @@ from tandem_dj.sources.youtube import ONLY_VIDEO_WARNING, YouTubeSource, _track_
         ("https://youtu.be/ekr2nIex040", YouTubeSource),
         ("https://soundcloud.com/ninja-tune/sets/elliott-skinner-how-far-weve", SoundCloudSource),
         ("https://on.soundcloud.com/AbCdEf", SoundCloudSource),
+        ("https://www.nts.live/shows/some-show/episodes/some-show-31st-january-2026", NtsSource),
+        ("nts.live/shows/some-show", NtsSource),
     ],
 )
 def test_each_link_is_accepted_by_exactly_its_source(reference, expected_source):
     """
     A link is recognised by the source of its website and by no other.
     """
-    accepting_sources = [
-        type(source) for source in (SpotifySource(), YouTubeSource(), SoundCloudSource()) if source.accepts(reference)
-    ]
+    accepting_sources = [type(source) for source in WEBSITE_SOURCES if source.accepts(reference)]
     assert accepting_sources == [expected_source]
 
 
@@ -329,3 +330,107 @@ def test_soundcloud_description_without_metadata_falls_back_to_uploader():
         {"title": "Moonman Dont Be Afraid", "duration": 384000, "user": {"username": "Richardevans1983"}}
     )
     assert (track.artists, track.artist_is_uncertain) == (("Richardevans1983",), True)
+
+
+def nts_episode(entries: object) -> dict:
+    """
+    Describe an episode the way the NTS API does, with the fields the reader uses.
+
+    :param entries: What the API gives as the results of the tracklist
+    :returns: Description of the episode
+    """
+    return {
+        "name": "Some Show w/  A Guest",
+        "broadcast": "2026-01-31T18:00:00+00:00",
+        "show_alias": "some-show",
+        "episode_alias": "some-show-31st-january-2026",
+        "embeds": {"tracklist": {"metadata": {"resultset": {"count": 3, "offset": 0, "limit": 3}}, "results": entries}},
+    }
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        (
+            {"artist": "Daniel Avery", "title": "Naive Response", "uid": "0123", "offset": None, "duration": None},
+            Track(artists=("Daniel Avery",), title="Naive Response"),
+        ),
+        (
+            {"artist": "Schacke, Maceo Plex", "title": "Body Type (Maceo Plex Remix) ", "offset": 124, "duration": 303},
+            Track(artists=("Schacke", "Maceo Plex"), title="Body Type (Maceo Plex Remix)"),
+        ),
+        (
+            {"artist": "Darude Ft. Some Singer", "title": "Feel the Beat"},
+            Track(artists=("Darude", "Some Singer"), title="Feel the Beat"),
+        ),
+        ({"artist": "Kalbata & Mixmonster", "title": "Out A Road"}, Track(("Kalbata & Mixmonster",), "Out A Road")),
+        ({"artist": None, "title": "Kiss Me"}, Track(artists=(), title="Kiss Me")),
+        ({"artist": "Daniel Avery", "title": None}, None),
+    ],
+)
+def test_nts_entry_becomes_track(entry, expected):
+    """
+    An entry of an NTS tracklist gives its main artist first, then the others, and no length: the duration NTS
+    gives is how long the track was heard in the show.
+    """
+    assert nts._track_from_entry(entry) == expected
+
+
+def test_nts_episode_link_reads_the_tracklist(monkeypatch):
+    """
+    The link of an episode is read through the API under the names the link holds, in lower case, and the
+    collection is named after the episode and the day it was broadcast.
+    """
+    asked: list[tuple[str, str]] = []
+
+    def fetch_episode(show_alias: str, episode_alias: str) -> dict:
+        """
+        Answer like the NTS API for an episode of three entries, one of them without title.
+
+        :param show_alias: Name of the show in links
+        :param episode_alias: Name of the episode in links
+        :returns: Description of the episode
+        """
+        asked.append((show_alias, episode_alias))
+        return nts_episode(
+            [
+                {"artist": "Daniel Avery", "title": "Naive Response"},
+                {"artist": "Somebody", "title": ""},
+                {"artist": "Schacke, Maceo Plex", "title": "Body Type (Maceo Plex Remix)"},
+            ]
+        )
+
+    monkeypatch.setattr(nts, "_fetch_episode", fetch_episode)
+    collection = read_tracks("https://www.NTS.live/shows/Some-Show/episodes/Some-Show-31st-January-2026/?utm=1#tracks")
+    assert asked == [("some-show", "some-show-31st-january-2026")]
+    assert (collection.name, collection.origin) == ("Some Show w/ A Guest (2026-01-31)", "nts")
+    assert collection.url == "https://www.nts.live/shows/some-show/episodes/some-show-31st-january-2026"
+    assert [track.display_name for track in collection.tracks] == [
+        "Daniel Avery - Naive Response",
+        "Schacke, Maceo Plex - Body Type (Maceo Plex Remix)",
+    ]
+
+
+@pytest.mark.parametrize("empty_tracklist", [{"metadata": {"resultset": {"count": 0}}, "results": []}, []])
+def test_nts_episode_without_tracklist_is_an_error(monkeypatch, empty_tracklist):
+    """
+    An episode NTS shows no tracklist for is reported as such, in both ways the API writes an empty tracklist.
+    """
+    description = nts_episode([]) | {"embeds": {"tracklist": empty_tracklist}}
+    monkeypatch.setattr(nts, "_fetch_episode", lambda show_alias, episode_alias: description)
+    with pytest.raises(SourceError, match="no tracklist"):
+        NtsSource().read("https://www.nts.live/shows/some-show/episodes/some-show-31st-january-2026")
+
+
+@pytest.mark.parametrize(
+    "reference",
+    ["https://www.nts.live/shows/some-show", "https://www.nts.live/infinite-mixtapes/poolside", "https://nts.live"],
+)
+def test_nts_link_that_is_not_an_episode_is_explained(monkeypatch, reference):
+    """
+    A link to a show, a mixtape or the home page of NTS says which link is wanted, without asking NTS anything.
+    """
+    monkeypatch.setattr(nts, "_fetch_episode", lambda show_alias, episode_alias: pytest.fail("NTS was asked"))
+    with pytest.raises(SourceError) as raised:
+        read_tracks(reference)
+    assert str(raised.value) == NOT_AN_EPISODE_MESSAGE
