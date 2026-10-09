@@ -197,6 +197,10 @@ A "no" raises `DownloadCancelled`, which the window logs without an error box.
   around the path alone, spaces, commas and semicolons in the path are fine. The path is made absolute first,
   which also turns the forward slashes of the sockseek index into backslashes. Every command run is in the log
   file. `open_folder()` uses `os.startfile()`, which already follows the registered program.
+- **The window says which version runs**, which the user asked for: `VERSION_TEXT` (`Tandem DJ <version>`, from
+  `tandem_dj.__version__`) is the title of the window and the text of `version_label`, at the right end of the
+  VPN line of the summary bar, so that it is also in a screenshot cut below the title. Message boxes keep the
+  plain `WINDOW_TITLE`.
 - `_log()` writes to the log file as well as the log pane. `write_log()` alone records details that would clutter
   the pane, such as the full list of tracks sent.
 - Closing the window during a download stops sockseek first and waits for the worker, so the VPN guard always

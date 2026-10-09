@@ -214,6 +214,9 @@ setup (versions, folders, what is missing) and the details of any unexpected err
 
 Click **Open logs folder** under the track table and send the most recent `tandem_<date>_<time>.log`.
 
+The version you are running is written in the title of the window and at the right of the VPN line, such as
+`Tandem DJ 0.11.0`.
+
 If the window does not open at all, a message box says why and where the log file is.
 
 Common situations:
@@ -346,9 +349,9 @@ The version is never written in the code: it is the git tag. Creating the tag is
 The same from a terminal: `git tag v0.3.0; git push origin v0.3.0`.
 
 Builds made between two releases carry a development version such as `0.3.1.dev4+g1a2b3c4`: the next version,
-the number of commits since the last tag, and the commit. The first line of every log file gives the version,
-so a log always says which build it came from. Version numbers follow `major.minor.patch`; anything below `1.0.0`
-is a beta.
+the number of commits since the last tag, and the commit. The window shows the version in its title and at the
+right of the VPN line, and the first line of every log file gives it, so a log always says which build it came
+from. Version numbers follow `major.minor.patch`; anything below `1.0.0` is a beta.
 
 To ship a newer sockseek, change `SOCKSEEK_VERSION` in `scripts/build.py`, delete the program in `vendor/sockseek/`
 and run the tests.

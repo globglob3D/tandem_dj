@@ -13,6 +13,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 from types import TracebackType
 
+from tandem_dj import __version__
 from tandem_dj.batch_folder import batch_folder_name
 from tandem_dj.config import ConfigurationError, Settings, default_settings, load_settings
 from tandem_dj.diagnostics import describe_setup
@@ -63,6 +64,7 @@ from tandem_dj.workflow import (
 )
 
 WINDOW_TITLE = APPLICATION_NAME
+VERSION_TEXT = f"{APPLICATION_NAME} {__version__}"
 WINDOW_SIZE = "1400x800"
 PROGRESS_BAR_CELLS = 10
 REFRESH_INTERVAL_MILLISECONDS = 300
@@ -139,7 +141,7 @@ class MainWindow(tkinter.Tk):
         self.soulseek_paths: dict[Track, str] = {}
         self.rows_before_request: dict[str, tuple[tuple, tuple]] = {}
 
-        self.title(WINDOW_TITLE)
+        self.title(VERSION_TEXT)
         self.geometry(WINDOW_SIZE)
         self.minsize(900, 560)
         theme.set_application_icon(self)
@@ -238,7 +240,8 @@ class MainWindow(tkinter.Tk):
 
     def _build_summary_bar(self) -> None:
         """
-        Create the bar showing the overall progress, total speed, time left and VPN state.
+        Create the bar showing the overall progress, total speed, time left, VPN state and, at its right end, the
+        version of the application.
         """
         frame = ttk.Frame(self, padding=(10, 4))
         frame.pack(fill="x")
@@ -248,6 +251,8 @@ class MainWindow(tkinter.Tk):
         self.summary_label.grid(row=0, column=1, sticky="w")
         self.vpn_label = ttk.Label(frame, text="VPN: not checked yet", padding=(0, 4, 0, 0))
         self.vpn_label.grid(row=1, column=0, columnspan=2, sticky="w")
+        self.version_label = ttk.Label(frame, text=VERSION_TEXT, padding=(10, 4, 0, 0), style="Dim.TLabel")
+        self.version_label.grid(row=1, column=2, sticky="e")
         frame.columnconfigure(1, weight=1)
 
     def _build_log(self) -> None:

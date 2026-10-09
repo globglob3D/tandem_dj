@@ -12,6 +12,7 @@ import tkinter
 
 import pytest
 
+import tandem_dj
 from tandem_dj import logs
 from tandem_dj.config import default_settings, load_settings, save_settings
 from tandem_dj.models import Track, TrackCollection
@@ -713,6 +714,14 @@ def test_window_messages_go_to_the_log_pane_and_the_log_file(window, tmp_path):
     assert "Something worth keeping" in window.log_box.get("1.0", "end")
     assert "WARNING  Something worth keeping" in log_file.read_text(encoding="utf-8")
     assert window.logs_button.cget("text") == "Open logs folder"
+
+
+def test_the_window_shows_the_version_in_its_title_and_next_to_the_vpn_state(window):
+    """
+    The version of the application is in the title of the window and written inside it.
+    """
+    assert window.title() == f"Tandem DJ {tandem_dj.__version__}"
+    assert window.version_label.cget("text") == f"Tandem DJ {tandem_dj.__version__}"
 
 
 def test_questions_from_the_worker_are_asked_in_a_warning_box_defaulting_to_no(window, monkeypatch):
