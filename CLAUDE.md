@@ -586,6 +586,12 @@ What is known to work and what is not:
   default of the author's machine) and Explorer both opened its folder with the file selected. The
   `Name on Soulseek` column, driven through the real window against the mock mode: two songs, a failed track and
   an album downloaded, then the list read again, which showed the names again from the file that keeps them.
+  The NTS reader, run for real: the episode link the user gave read through the real window and its worker
+  thread, its 19 tracks in the order and spelling of the NTS page; a show link, a missing episode and an
+  episode without tracklist each refused with their own message.
+- **Never checked for NTS**: a download of an NTS list (only the reading was run; the tracks then go the same
+  way as those of any website, without a length to filter wrong recordings). What `duration` means was read
+  from three episodes of October 2026, and the whole reader from about thirty episodes of 2022 and 2026.
 - **Never checked**: what the window looks like on a Mac (fonts, the `clam` theme, dialogs, the right-click menu,
   which is opened by a secondary click or Control-click there), the first-launch steps on macOS described in
   `README.md`, and `piactl` at `/usr/local/bin/piactl`. The relaxed search, the album search and the options that
