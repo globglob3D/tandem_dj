@@ -573,9 +573,11 @@ relaxed search has no round without the artist, tracks whose artist is unsure go
 own, and the closest file must name the whole artist in one part of its path. 0.9.0, released on
 2026-10-08 too, added the `Name on Soulseek` column, which shows what each downloaded file was named where it
 was shared. 0.10.0, released on 2026-10-09, reads the tracklist of an episode of an NTS Radio show from its link.
+0.11.0, released on 2026-10-09 as well, shows the version in the title of the window and at the right of its VPN
+line.
 What is known to work and what is not:
 
-- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (354
+- **Checked by the GitHub Actions workflow on Windows, macOS arm64 and macOS x64**: the whole test suite (355
   tests, including the offline runs of the real sockseek and the hidden-window tests; the one reading the Windows
   registry is skipped on macOS), the build, and the smoke test showing that the packaged application starts and
   that the sockseek and ffmpeg packed inside answer.
@@ -592,7 +594,9 @@ What is known to work and what is not:
   an album downloaded, then the list read again, which showed the names again from the file that keeps them.
   The NTS reader, run for real: the episode link the user gave read through the real window and its worker
   thread, its 19 tracks in the order and spelling of the NTS page; a show link, a missing episode and an
-  episode without tracklist each refused with their own message.
+  episode without tracklist each refused with their own message. The version shown by the real window, opened
+  on temporary settings: in the title and at the right end of the VPN line, at the default size and at the
+  smallest one.
 - **Never checked for NTS**: a download of an NTS list (only the reading was run; the tracks then go the same
   way as those of any website, without a length to filter wrong recordings). What `duration` means was read
   from three episodes of October 2026, and the whole reader from about thirty episodes of 2022 and 2026.
